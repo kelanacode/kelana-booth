@@ -219,8 +219,6 @@ function unlockAlerts() {
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   } catch (e) {}
   alertsUnlocked = true;
-  beep(1);
-  if (CAN_VIBRATE) navigator.vibrate(120);
   try {
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
   } catch (e) {}
@@ -258,17 +256,25 @@ function alertGuest(stage, text) {
   fireAlert(stage, text);
 }
 
+// Auto-activate on the guest's first touch anywhere (tapping "Ambil Nomor"
+// or a frame counts). Browsers refuse sound/vibration before any touch.
+function autoUnlock() {
+  if (alertsUnlocked) return;
+  unlockAlerts();
+  var hint = document.getElementById('touchHint');
+  if (hint) hint.remove();
+}
+['pointerdown', 'touchstart', 'keydown'].forEach(function (type) {
+  document.addEventListener(type, autoUnlock, { capture: true, passive: true });
+});
+
 function alertsCard() {
   if (alertsUnlocked) return '';
-  return '<button class="btn ghost" id="unlockAlerts" type="button">🔔 Aktifkan bunyi' +
-    (CAN_VIBRATE ? ' &amp; getar' : '') + '</button>' +
-    (CAN_VIBRATE ? '' : '<p class="hint">iPhone tidak mendukung getar dari browser. Bunyi tetap berbunyi selama halaman ini terbuka.</p>');
+  return '<p class="hint" id="touchHint">🔔 Sentuh layar sekali agar HP bisa berbunyi' +
+    (CAN_VIBRATE ? ' &amp; bergetar' : '') + '.</p>';
 }
 
-function wireAlertsButton() {
-  var b = document.getElementById('unlockAlerts');
-  if (b) b.onclick = function () { unlockAlerts(); b.remove(); };
-}
+function wireAlertsButton() {}
 
 function askNotify() {
   unlockAlerts();
