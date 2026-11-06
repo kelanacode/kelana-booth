@@ -447,6 +447,24 @@ export default {
         headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
       });
     }
+    // Service worker for the /q page: Android Chrome only shows notifications
+    // through one. Tapping a notification brings the queue page back.
+    if (request.method === 'GET' && pathname === '/q-sw.js') {
+      const sw = [
+        "self.addEventListener('install', () => self.skipWaiting());",
+        "self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));",
+        "self.addEventListener('notificationclick', (e) => {",
+        '  e.notification.close();',
+        "  e.waitUntil(self.clients.matchAll({ type: 'window' }).then((list) => {",
+        "    for (const c of list) if (c.url.includes('/q')) return c.focus();",
+        "    return self.clients.openWindow('/q');",
+        '  }));',
+        '});',
+      ].join('\n');
+      return new Response(sw, {
+        headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' },
+      });
+    }
     if (pathname.startsWith('/api/queue/')) {
       return handleQueueApi(request, env, pathname);
     }

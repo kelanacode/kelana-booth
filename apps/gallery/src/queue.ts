@@ -179,21 +179,99 @@ function chooseFrame(id) {
 
 function view(html) { document.getElementById('view').innerHTML = html; }
 
-function alertGuest(stage, text) {
-  if (stage === lastStage) return;
-  lastStage = stage;
-  if (navigator.vibrate) navigator.vibrate(stage === 'now' ? [400, 150, 400, 150, 400] : [250, 120, 250]);
+// Browsers only allow sound and vibration after the guest has touched the
+// page (and again after every reload), so the page shows an "Aktifkan" button
+// until it has been tapped in this page load.
+var audioCtx = null;
+var alertsUnlocked = false;
+var swReg = null;
+var nowRepeats = 0;
+var CAN_VIBRATE = typeof navigator.vibrate === 'function';
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/q-sw.js').then(function (reg) { swReg = reg; }).catch(function () {});
+}
+
+function beep(times) {
+  if (!audioCtx) return;
   try {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('Antrian Photobooth', { body: text, tag: 'kelana-queue' });
+    var t = audioCtx.currentTime;
+    for (var i = 0; i < times; i++) {
+      var osc = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = i % 2 ? 1175 : 880;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.6, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + 0.3);
+      t += 0.38;
     }
   } catch (e) {}
 }
 
-function askNotify() {
+function unlockAlerts() {
+  try {
+    var Ctx = window.AudioContext || window.webkitAudioContext;
+    if (Ctx && !audioCtx) audioCtx = new Ctx();
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (e) {}
+  alertsUnlocked = true;
+  beep(1);
+  if (CAN_VIBRATE) navigator.vibrate(120);
   try {
     if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
   } catch (e) {}
+}
+
+function notify(text) {
+  try {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    var opts = { body: text, tag: 'kelana-queue', renotify: true, vibrate: [300, 120, 300] };
+    // Android Chrome only shows notifications through the service worker.
+    if (swReg && swReg.showNotification) swReg.showNotification('Antrian Photobooth', opts);
+    else new Notification('Antrian Photobooth', opts);
+  } catch (e) {}
+}
+
+function fireAlert(stage, text) {
+  if (CAN_VIBRATE) navigator.vibrate(stage === 'now' ? [500, 150, 500, 150, 500] : [300, 120, 300]);
+  beep(stage === 'now' ? 4 : 2);
+  notify(text);
+}
+
+function alertGuest(stage, text) {
+  if (stage === lastStage) {
+    // Keep nudging (up to 3 more times, every ~20s) while it is their turn.
+    if (stage === 'now' && nowRepeats < 3 && Date.now() - (alertGuest.at || 0) > 20000) {
+      nowRepeats += 1;
+      alertGuest.at = Date.now();
+      fireAlert(stage, text);
+    }
+    return;
+  }
+  lastStage = stage;
+  nowRepeats = 0;
+  alertGuest.at = Date.now();
+  fireAlert(stage, text);
+}
+
+function alertsCard() {
+  if (alertsUnlocked) return '';
+  return '<button class="btn ghost" id="unlockAlerts" type="button">🔔 Aktifkan bunyi' +
+    (CAN_VIBRATE ? ' &amp; getar' : '') + '</button>' +
+    (CAN_VIBRATE ? '' : '<p class="hint">iPhone tidak mendukung getar dari browser. Bunyi tetap berbunyi selama halaman ini terbuka.</p>');
+}
+
+function wireAlertsButton() {
+  var b = document.getElementById('unlockAlerts');
+  if (b) b.onclick = function () { unlockAlerts(); b.remove(); };
+}
+
+function askNotify() {
+  unlockAlerts();
 }
 
 function showTake(reason) {
@@ -258,12 +336,16 @@ function render(s) {
     '<div class="stat"><b>' + (s.now_number != null ? s.now_number : '-') + '</b><span>Sekarang</span></div>' +
     '<div class="stat"><b>' + s.ahead + '</b><span>Antrian lagi</span></div>' +
     (eta ? '<div class="stat"><b style="font-size:1.1rem;line-height:1.9rem">' + eta + '</b><span>Estimasi</span></div>' : '') +
-    '</div>' + msg + frameSection(s) +
-    (!s.enabled ? '<p class="hint">Antrian sedang dijeda oleh petugas.</p>' : '') +
-    '<p class="hint">Biarkan halaman ini terbuka agar HP bergetar saat giliranmu dekat.</p>';
+    '</div>' + (s.enabled ? msg : '<p class="msg">Antrian sedang dijeda oleh petugas. Nomormu tetap aman.</p>') +
+    frameSection(s) + alertsCard() +
+    '<p class="hint">Biarkan halaman ini terbuka agar HP berbunyi' + (CAN_VIBRATE ? ' dan bergetar' : '') +
+    ' saat giliranmu dekat.</p>';
   view(html);
   wireFrameButton();
-  if (stage !== 'wait') {
+  wireAlertsButton();
+  if (!s.enabled) {
+    lastStage = 'paused';
+  } else if (stage !== 'wait') {
     alertGuest(stage, stage === 'now' ? 'Giliranmu sekarang! Silakan ke booth.' :
       stage === 'next' ? 'Kamu berikutnya, ke booth sekarang.' : 'Giliranmu sebentar lagi.');
   } else {
