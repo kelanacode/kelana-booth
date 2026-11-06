@@ -54,6 +54,14 @@ export const renderQueuePage = (params: { theme: BoothTheme }): string => {
   .fsec .ft b { display:block; font-size:.95rem; }
   .fsec .ft span { font-size:.75rem; opacity:.6; }
   .fsec .btn { margin:0; padding:9px 14px; font-size:.8rem; }
+  .modal { position:fixed; inset:0; z-index:20; background:rgb(0 0 0 / .72); display:flex; align-items:center; justify-content:center; padding:20px; }
+  .modal-box { width:min(100%,360px); text-align:center; padding:26px 22px 20px; border-radius:24px; background:var(--pbx-ui-panel);
+    border:1px solid rgb(255 255 255 / .14); box-shadow:0 20px 60px rgb(0 0 0 / .5); }
+  .modal-box .bell { font-size:3rem; line-height:1; }
+  .modal-box h2 { margin:12px 0 6px; font-size:1.25rem; }
+  .modal-box p { margin:0; font-size:.9rem; line-height:1.5; opacity:.75; }
+  .modal-box .btn { display:block; width:100%; margin-top:20px; }
+  .modal-box .later { margin-top:10px; background:none; border:0; color:#fff; opacity:.6; font:inherit; font-size:.85rem; cursor:pointer; padding:8px; }
   .sheet { position:fixed; inset:0; z-index:10; background:rgb(0 0 0 / .7); display:flex; align-items:flex-end; justify-content:center; }
   .sheet-box { width:min(100vw,560px); max-height:88vh; overflow:auto; padding:20px 16px 28px; border-radius:24px 24px 0 0;
     background:var(--pbx-ui-panel); }
@@ -73,6 +81,15 @@ export const renderQueuePage = (params: { theme: BoothTheme }): string => {
   <h1>Antrian Photobooth</h1>
   <div id="view"><p class="msg">Memuat&hellip;</p></div>
 </main>
+<div class="modal hidden" id="alertModal" role="dialog" aria-modal="true" aria-labelledby="alertModalTitle">
+  <div class="modal-box">
+    <div class="bell">🔔</div>
+    <h2 id="alertModalTitle">Aktifkan notifikasi</h2>
+    <p id="alertModalText">Biar HP-mu berbunyi saat giliranmu dekat, jadi kamu bisa santai dulu tanpa takut terlewat.</p>
+    <button class="btn" id="alertModalOk" type="button">🔔 Aktifkan notifikasi</button>
+    <button class="later" id="alertModalLater" type="button">Nanti saja</button>
+  </div>
+</div>
 <div class="sheet hidden" id="sheet">
   <div class="sheet-box">
     <h2>Pilih frame</h2>
@@ -308,23 +325,47 @@ function alertsCard() {
   return '<p class="hint">✓ ' + (perm === 'granted' ? 'Notifikasi aktif' : 'Bunyi aktif') + '</p>';
 }
 
+// First visit: ask in a modal so the guest notices it. Shown once per page
+// load; "Nanti saja" leaves the inline button as a fallback.
+var modalShown = false;
+function needsAlertPrompt() {
+  var perm = notifPermission();
+  return perm === 'default' || (perm === 'unsupported' && !alertsUnlocked);
+}
+function maybeShowAlertModal() {
+  if (modalShown || !needsAlertPrompt()) return;
+  modalShown = true;
+  var unsupported = notifPermission() === 'unsupported';
+  document.getElementById('alertModalTitle').textContent = unsupported ? 'Aktifkan bunyi' : 'Aktifkan notifikasi';
+  document.getElementById('alertModalOk').textContent = unsupported ? '🔔 Aktifkan bunyi' : '🔔 Aktifkan notifikasi';
+  if (unsupported) {
+    document.getElementById('alertModalText').textContent =
+      'Biar HP-mu berbunyi saat giliranmu dekat. Biarkan halaman ini tetap terbuka ya.';
+  }
+  document.getElementById('alertModal').classList.remove('hidden');
+}
+function closeAlertModal() { document.getElementById('alertModal').classList.add('hidden'); }
+
+function enableAlerts() {
+  closeAlertModal();
+  unlockAlerts();
+  beep(1);
+  if (CAN_VIBRATE) navigator.vibrate(150);
+  var done = function () { poll(); };
+  try {
+    if (NOTIF_SUPPORTED && Notification.permission === 'default') {
+      var res = Notification.requestPermission(done);
+      if (res && res.then) res.then(done, done);
+      return;
+    }
+  } catch (e) {}
+  done();
+}
+
 function wireAlertsButton() {
   var b = document.getElementById('enableAlerts');
-  if (!b) return;
-  b.onclick = function () {
-    unlockAlerts();
-    beep(1);
-    if (CAN_VIBRATE) navigator.vibrate(150);
-    var done = function () { poll(); };
-    try {
-      if (NOTIF_SUPPORTED && Notification.permission === 'default') {
-        var res = Notification.requestPermission(done);
-        if (res && res.then) res.then(done, done);
-        return;
-      }
-    } catch (e) {}
-    done();
-  };
+  if (b) b.onclick = enableAlerts;
+  maybeShowAlertModal();
 }
 
 function askNotify() {
@@ -444,6 +485,8 @@ function poll() {
   }).catch(function () { schedule(); });
 }
 
+document.getElementById('alertModalOk').onclick = enableAlerts;
+document.getElementById('alertModalLater').onclick = closeAlertModal;
 document.getElementById('sheetClose').onclick = closeSheet;
 document.getElementById('sheet').addEventListener('click', function (e) { if (e.target.id === 'sheet') closeSheet(); });
 document.addEventListener('visibilitychange', function () { if (!document.hidden && load(TICKET_KEY)) poll(); });
