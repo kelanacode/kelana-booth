@@ -1,0 +1,38 @@
+<!doctype html><html><head><meta charset="utf-8"><style>@font-face{font-family:"Great Vibes";src:url(gv.ttf)}@font-face{font-family:"Cormorant Garamond";font-weight:500 600;src:url(cg.ttf)}body{margin:0}svg{display:block}</style></head><body>
+<!-- 140 x 170 mm flat (2 panels 70 x 170), 300 dpi: 1 mm = 11.811 px -->
+<svg id="out" xmlns="http://www.w3.org/2000/svg" width="1654" height="2008" viewBox="0 0 140 170"></svg>
+<svg id="in" xmlns="http://www.w3.org/2000/svg" width="1654" height="2008" viewBox="0 0 140 170"></svg>
+<script>
+const NS='http://www.w3.org/2000/svg';
+const el=(t,a,p,txt)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);if(txt)e.textContent=txt;p.appendChild(e);return e};
+const defs=`<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#b8925a"/><stop offset=".5" stop-color="#e3c98f"/><stop offset="1" stop-color="#a87f45"/></linearGradient>
+<g id="leaf"><path d="M0 0 C1 -1.4 2.8 -1.6 4 -1 C2.8 -.2 1.2 .4 0 0Z" fill="#8a9a7b"/></g>
+<g id="sprig"><path d="M0 0 C3 -2 6 -3 10 -3.2" stroke="#7d8c6e" stroke-width=".25" fill="none"/>
+<use href="#leaf" transform="translate(2,-1) rotate(-50)"/><use href="#leaf" transform="translate(2.2,-1) rotate(20) scale(.9)"/>
+<use href="#leaf" transform="translate(5,-2.2) rotate(-60) scale(.9)"/><use href="#leaf" transform="translate(5.2,-2.2) rotate(10) scale(.8)"/>
+<use href="#leaf" transform="translate(8,-2.9) rotate(-40) scale(.75)"/>
+<circle cx="10.2" cy="-3.2" r=".9" fill="#e8c4c0"/><circle cx="10.2" cy="-3.2" r=".4" fill="#d79f9a"/></g></defs>`;
+const T=(p,x,y,s,txt,f='serif',fill='#7a5c3e',extra={})=>el('text',{x,y,'text-anchor':'middle','font-family':f==='script'?'Great Vibes':'Cormorant Garamond','font-weight':600,'font-size':s,fill,...extra},p,txt);
+const base=(id)=>{const s=document.getElementById(id);s.innerHTML=defs;el('rect',{width:140,height:170,fill:'#fbf7f1'},s);
+ for(const x of [0,70])el('rect',{x:x+4,y:4,width:62,height:162,rx:1,fill:'none',stroke:'url(#g)','stroke-width':.3},s);
+ el('line',{x1:70,y1:0,x2:70,y2:170,stroke:'#d9cbb6','stroke-width':.2,'stroke-dasharray':'1.5 1.5'},s);return s};
+// OUTSIDE: left = back, right = front cover
+const o=base('out');
+el('use',{href:'#sprig',transform:'translate(103,62) scale(-1.4,1.4)'},o);el('use',{href:'#sprig',transform:'translate(107,62) scale(1.4)'},o);
+T(o,105,82,15,'Firna','script');T(o,105,93,8,'&','script','#b8925a');T(o,105,106,15,'Ogi','script');
+el('line',{x1:93,y1:113,x2:117,y2:113,stroke:'url(#g)','stroke-width':.3},o);
+T(o,105,120,3.2,'THE WEDDING','serif','#8a9a7b',{'letter-spacing':1});T(o,105,126,3,'DD · MM · YYYY','serif','#a07f5c',{'letter-spacing':.6});
+el('use',{href:'#sprig',transform:'translate(30,150) scale(-1,1)'},o);el('use',{href:'#sprig',transform:'translate(40,150)'},o);
+T(o,35,160,2.4,'captured with love','serif','#a07f5c',{'letter-spacing':.5});
+// INSIDE: left = thank-you message, right = strip slot (50 x 148) with 4 corner slits
+const n=base('in');
+T(n,35,62,11,'Thank You','script');
+T(n,35,74,3,'for celebrating','serif','#8a9a7b',{'letter-spacing':.6});T(n,35,79,3,'our special day','serif','#8a9a7b',{'letter-spacing':.6});
+el('use',{href:'#sprig',transform:'translate(30,92) scale(-1,1)'},n);el('use',{href:'#sprig',transform:'translate(40,92)'},n);
+T(n,35,104,7,'Firna & Ogi','script','#a07f5c');
+const sx=80,sy=11,sw=50,sh=148;
+el('rect',{x:sx,y:sy,width:sw,height:sh,fill:'#f1e9dd',stroke:'#d9cbb6','stroke-width':.2},n);
+T(n,sx+sw/2,sy+sh/2,3,'PHOTOSTRIP 50 × 148 mm','serif','#c9b8a6',{'letter-spacing':.4});
+const k=8;for(const[cx,cy,dx,dy]of[[sx,sy,1,1],[sx+sw,sy,-1,1],[sx,sy+sh,1,-1],[sx+sw,sy+sh,-1,-1]])
+ el('line',{x1:cx+dx*k,y1:cy,x2:cx,y2:cy+dy*k,stroke:'#c0392b','stroke-width':.3,'stroke-dasharray':'1 .6'},n);
+</script></body></html>
