@@ -89,10 +89,34 @@ var lastStage = '';
 var timer = 0;
 function schedule() { clearTimeout(timer); timer = setTimeout(poll, POLL_MS); }
 
+// Saved twice (localStorage + a 1-year cookie) so the phone keeps its number
+// even if one of the two is cleared or unavailable.
+function setCookie(key, value) {
+  try {
+    document.cookie = key + '=' + (value === null ? '' : encodeURIComponent(value)) +
+      '; path=/; SameSite=Lax; max-age=' + (value === null ? 0 : 31536000) +
+      (location.protocol === 'https:' ? '; Secure' : '');
+  } catch (e) {}
+}
+function getCookie(key) {
+  try {
+    var m = document.cookie.match(new RegExp('(?:^|; )' + key + '=([^;]*)'));
+    return m && m[1] ? decodeURIComponent(m[1]) : null;
+  } catch (e) { return null; }
+}
 function store(key, value) {
   try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch (e) {}
+  setCookie(key, value);
 }
-function load(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
+function load(key) {
+  var v = null;
+  try { v = localStorage.getItem(key); } catch (e) {}
+  if (!v) {
+    v = getCookie(key);
+    if (v) { try { localStorage.setItem(key, v); } catch (e) {} }
+  }
+  return v;
+}
 
 function deviceId() {
   var id = load(DEVICE_KEY);
@@ -370,7 +394,10 @@ function poll() {
   }
   Promise.all([api('/api/queue/status/' + encodeURIComponent(ticket)), loadFrames()]).then(function (res) {
     var s = res[0];
-    if (!s || !s.ok) { store(TICKET_KEY, null); showTake(); return; }
+    // Only forget the ticket when the server says it no longer exists; a
+    // network blip or a busy server must never cost the guest their number.
+    if (s && !s.ok && s.reason === 'not_found') { store(TICKET_KEY, null); showTake(); return; }
+    if (!s || !s.ok) { schedule(); return; }
     current = s;
     if (render(s)) schedule();
   }).catch(function () { schedule(); });
