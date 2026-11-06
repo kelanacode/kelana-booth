@@ -54,6 +54,13 @@ export const renderQueuePage = (params: { theme: BoothTheme }): string => {
   .fsec .ft b { display:block; font-size:.95rem; }
   .fsec .ft span { font-size:.75rem; opacity:.6; }
   .fsec .btn { margin:0; padding:9px 14px; font-size:.8rem; }
+  .pager { position:fixed; inset:0; z-index:30; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:14px; padding:24px; text-align:center; background:var(--pbx-ui-hi); color:var(--pbx-ui-hi-fg); animation:flash .7s steps(1) infinite; }
+  .pager .big { font-size:2.2rem; font-weight:900; line-height:1.15; }
+  .pager .pnum { font-size:7rem; font-weight:900; line-height:1; }
+  .pager button { margin-top:10px; padding:16px 30px; border:0; border-radius:999px; font:inherit; font-size:1.1rem; font-weight:800;
+    background:#111; color:#fff; cursor:pointer; }
+  @keyframes flash { 0% { background:var(--pbx-ui-hi); color:var(--pbx-ui-hi-fg); } 50% { background:#111; color:var(--pbx-ui-hi); } }
   .modal { position:fixed; inset:0; z-index:20; background:rgb(0 0 0 / .72); display:flex; align-items:center; justify-content:center; padding:20px; }
   .modal-box { width:min(100%,360px); text-align:center; padding:26px 22px 20px; border-radius:24px; background:var(--pbx-ui-panel);
     border:1px solid rgb(255 255 255 / .14); box-shadow:0 20px 60px rgb(0 0 0 / .5); }
@@ -81,6 +88,12 @@ export const renderQueuePage = (params: { theme: BoothTheme }): string => {
   <h1>Antrian Photobooth</h1>
   <div id="view"><p class="msg">Memuat&hellip;</p></div>
 </main>
+<div class="pager hidden" id="pager" role="alertdialog" aria-live="assertive">
+  <div class="big">GILIRANMU!</div>
+  <div class="pnum" id="pagerNum"></div>
+  <div>Silakan ke booth sekarang 📸</div>
+  <button type="button" id="pagerOk">Oke, saya ke booth</button>
+</div>
 <div class="modal hidden" id="alertModal" role="dialog" aria-modal="true" aria-labelledby="alertModalTitle">
   <div class="modal-box">
     <div class="bell">🔔</div>
@@ -226,29 +239,57 @@ function view(html) { document.getElementById('view').innerHTML = html; }
 var audioCtx = null;
 var alertsUnlocked = false;
 var swReg = null;
-var nowRepeats = 0;
 var CAN_VIBRATE = typeof navigator.vibrate === 'function';
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/q-sw.js').then(function (reg) { swReg = reg; }).catch(function () {});
 }
 
+// Loud, pager-like tones: square waves at 2.6-3.1 kHz (where the ear is most
+// sensitive) through a compressor at full gain. A page can never play louder
+// than the phone's own volume setting.
+var master = null;
+var pagerNodes = [];
+function out() {
+  if (!audioCtx) return null;
+  if (!master) {
+    var comp = audioCtx.createDynamicsCompressor();
+    comp.threshold.value = -6;
+    comp.knee.value = 0;
+    comp.ratio.value = 20;
+    comp.attack.value = 0.001;
+    comp.release.value = 0.05;
+    master = audioCtx.createGain();
+    master.gain.value = 1;
+    master.connect(comp).connect(audioCtx.destination);
+  }
+  return master;
+}
+
+function tone(t, freq, dur, keep) {
+  var dest = out();
+  if (!dest) return;
+  var osc = audioCtx.createOscillator();
+  var gain = audioCtx.createGain();
+  osc.type = 'square';
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.linearRampToValueAtTime(1, t + 0.005);
+  gain.gain.setValueAtTime(1, t + dur - 0.01);
+  gain.gain.linearRampToValueAtTime(0.0001, t + dur);
+  osc.connect(gain).connect(dest);
+  osc.start(t);
+  osc.stop(t + dur + 0.02);
+  if (keep) pagerNodes.push(osc);
+}
+
 function beep(times) {
   if (!audioCtx) return;
   try {
-    var t = audioCtx.currentTime;
+    var t = audioCtx.currentTime + 0.02;
     for (var i = 0; i < times; i++) {
-      var osc = audioCtx.createOscillator();
-      var gain = audioCtx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = i % 2 ? 1175 : 880;
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(0.6, t + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
-      osc.connect(gain).connect(audioCtx.destination);
-      osc.start(t);
-      osc.stop(t + 0.3);
-      t += 0.38;
+      tone(t, i % 2 ? 3100 : 2600, 0.18);
+      t += 0.26;
     }
   } catch (e) {}
 }
@@ -283,19 +324,64 @@ function fireAlert(stage, text) {
   notify(text);
 }
 
-function alertGuest(stage, text) {
-  if (stage === lastStage) {
-    // Keep nudging (up to 3 more times, every ~20s) while it is their turn.
-    if (stage === 'now' && nowRepeats < 3 && Date.now() - (alertGuest.at || 0) > 20000) {
-      nowRepeats += 1;
-      alertGuest.at = Date.now();
-      fireAlert(stage, text);
-    }
+// Restaurant-pager mode for "it's your turn": a trill every 1.5s plus
+// vibration and a flashing full-screen card, until the guest taps "Oke" or the
+// turn passes (session started, skipped, paused). The trills are scheduled up
+// to 60s ahead on the audio clock so they keep sounding even if the browser
+// slows this page's timers down.
+var pagerOn = false;
+var pagerAckNumber = null;
+var pagerScheduledTo = 0;
+var pagerTimer = 0;
+var PAGER_CYCLE = 1.5;
+
+function schedulePager() {
+  if (!audioCtx) return;
+  var now = audioCtx.currentTime;
+  if (pagerScheduledTo < now) pagerScheduledTo = now + 0.05;
+  while (pagerScheduledTo < now + 60) {
+    for (var i = 0; i < 6; i++) tone(pagerScheduledTo + i * 0.09, i % 2 ? 3100 : 2600, 0.07, true);
+    pagerScheduledTo += PAGER_CYCLE;
+  }
+}
+
+function pagerTick() {
+  if (!pagerOn) return;
+  try { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); } catch (e) {}
+  schedulePager();
+  if (CAN_VIBRATE) navigator.vibrate([600, 200, 600]);
+}
+
+function startPager(number, text) {
+  if (pagerOn || pagerAckNumber === number) return;
+  pagerOn = true;
+  document.getElementById('pagerNum').textContent = number;
+  document.getElementById('pager').classList.remove('hidden');
+  notify(text);
+  pagerTick();
+  pagerTimer = setInterval(pagerTick, 2000);
+}
+
+function stopPager() {
+  if (!pagerOn) return;
+  pagerOn = false;
+  clearInterval(pagerTimer);
+  pagerNodes.forEach(function (osc) { try { osc.stop(); } catch (e) {} });
+  pagerNodes = [];
+  pagerScheduledTo = 0;
+  if (CAN_VIBRATE) navigator.vibrate(0);
+  document.getElementById('pager').classList.add('hidden');
+}
+
+function alertGuest(stage, text, number) {
+  if (stage === 'now') {
+    lastStage = stage;
+    startPager(number, text);
     return;
   }
+  stopPager();
+  if (stage === lastStage) return;
   lastStage = stage;
-  nowRepeats = 0;
-  alertGuest.at = Date.now();
   fireAlert(stage, text);
 }
 
@@ -398,6 +484,7 @@ function minutes(seconds, ahead) {
 
 function render(s) {
   var html = '<p class="label">Nomor kamu</p><div class="num">' + s.number + '</div>';
+  if (s.status !== 'waiting') stopPager();
   if (s.status === 'done') {
     view(html + '<p class="msg">Terima kasih! Sesi fotomu sudah selesai. 🎉</p>' +
       '<button class="btn ghost" id="again" type="button">Ambil nomor baru</button>');
@@ -456,11 +543,13 @@ function render(s) {
   wireFrameButton();
   wireAlertsButton();
   if (!s.enabled) {
+    stopPager();
     lastStage = 'paused';
   } else if (stage !== 'wait') {
     alertGuest(stage, stage === 'now' ? 'Giliranmu sekarang! Silakan ke booth.' :
-      stage === 'next' ? 'Kamu berikutnya, ke booth sekarang.' : 'Giliranmu sebentar lagi.');
+      stage === 'next' ? 'Kamu berikutnya, ke booth sekarang.' : 'Giliranmu sebentar lagi.', s.number);
   } else {
+    stopPager();
     lastStage = 'wait';
   }
   return true;
@@ -486,6 +575,10 @@ function poll() {
 }
 
 document.getElementById('alertModalOk').onclick = enableAlerts;
+document.getElementById('pagerOk').onclick = function () {
+  pagerAckNumber = Number(document.getElementById('pagerNum').textContent);
+  stopPager();
+};
 document.getElementById('alertModalLater').onclick = closeAlertModal;
 document.getElementById('sheetClose').onclick = closeSheet;
 document.getElementById('sheet').addEventListener('click', function (e) { if (e.target.id === 'sheet') closeSheet(); });
