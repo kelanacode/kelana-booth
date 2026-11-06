@@ -1,0 +1,45 @@
+<!doctype html><html><head><meta charset="utf-8"><style>@font-face{font-family:"Great Vibes";src:url(gv.ttf)}@font-face{font-family:"Cormorant Garamond";font-weight:600;src:url(cg.ttf)}
+body{margin:0;background:#ece8e3;font-family:"Cormorant Garamond"}#w{display:flex;gap:70px;padding:50px 70px 30px;align-items:flex-end}
+.c{text-align:center;color:#5e1f2a;font-weight:600;font-size:26px;letter-spacing:2px}svg{letter-spacing:0;filter:drop-shadow(0 14px 18px rgba(0,0,0,.35))}</style></head><body>
+<div id="w"><div class="c"><svg id="a" width="396" height="1200" viewBox="0 0 66 200"></svg><p>HOLDER (KOSONG)</p></div>
+<div class="c"><svg id="b" width="396" height="1200" viewBox="0 0 66 200"></svg><p>DENGAN PHOTOSTRIP</p></div></div>
+<script>
+const NS='http://www.w3.org/2000/svg';const el=(t,a,p,x)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);if(x)e.textContent=x;p.appendChild(e);return e};
+const shape='M0 33 A33 33 0 0 1 66 33 L66 196 Q66 200 62 200 L4 200 Q0 200 0 196 Z';
+const defs=`<defs><clipPath id="cp"><path d="${shape}"/></clipPath>
+<radialGradient id="bg" cx=".5" cy=".35" r=".8"><stop offset="0" stop-color="#6e2433"/><stop offset=".6" stop-color="#3d1520"/><stop offset="1" stop-color="#1f0a10"/></radialGradient>
+<linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a8823f"/><stop offset=".5" stop-color="#ecd294"/><stop offset="1" stop-color="#9c7535"/></linearGradient>
+<radialGradient id="rp"><stop offset="0" stop-color="#b65f6c"/><stop offset="1" stop-color="#eaa9b0"/></radialGradient>
+<radialGradient id="rw"><stop offset="0" stop-color="#d8bfb8"/><stop offset="1" stop-color="#f7eee8"/></radialGradient>
+<radialGradient id="rd"><stop offset="0" stop-color="#5a1420"/><stop offset="1" stop-color="#a83a4c"/></radialGradient>
+<filter id="blur"><feGaussianBlur stdDeviation="2.2"/></filter>
+<g id="leaf"><path d="M0 0 C1.2 -1.6 3.4 -1.8 5 -1 C3.4 0 1.4 .5 0 0Z" fill="#8fae95"/></g></defs>`;
+const rose=(p,x,y,r,f)=>{const g=el('g',{transform:`translate(${x},${y})`},p);for(let i=0;i<4;i++)el('circle',{r:r*(1-i*.22),fill:f,stroke:'#0003','stroke-width':.12},g)};
+const bouquet=(p,x,y,s,fl=1)=>{const g=el('g',{transform:`translate(${x},${y}) scale(${s*fl},${s})`},p);
+ el('use',{href:'#leaf',transform:'translate(-3,2) rotate(150)'},g);el('use',{href:'#leaf',transform:'translate(4,2.5) rotate(30)'},g);
+ rose(g,-2.6,0,2.4,'url(#rp)');rose(g,2.4,-.6,2.6,'url(#rw)');rose(g,.2,2.6,1.9,'url(#rd)');rose(g,-.4,-2.4,1.6,'url(#rp)');
+ for(const[a,b]of[[4.6,-3],[5.4,-2],[-4.6,-2.6]])el('circle',{cx:a,cy:b,r:.35,fill:'#f7eee8'},g)};
+function draw(id,withStrip){const s=document.getElementById(id);s.innerHTML=defs;const c=el('g',{'clip-path':'url(#cp)'},s);
+ el('rect',{width:66,height:200,fill:'url(#bg)'},c);
+ for(const[x,y,r,o]of[[8,60,9,.35],[58,95,11,.3],[12,150,10,.3],[55,175,8,.35],[30,120,7,.18]])el('circle',{cx:x,cy:y,r,fill:'#c4566a','fill-opacity':o,filter:'url(#blur)'},c);
+ bouquet(c,9,42,1.15);bouquet(c,57,42,1.15,-1);bouquet(c,8,190,1.2);bouquet(c,58,190,1.2,-1);
+ el('path',{d:'M3 33 A30 30 0 0 1 63 33 L63 197 L3 197 Z',fill:'none',stroke:'url(#g)','stroke-width':.3},s);
+ el('circle',{cx:33,cy:7,r:1.6,fill:'#ece8e3',stroke:'url(#g)','stroke-width':.2},s);
+ el('text',{x:33,y:22,'text-anchor':'middle','font-family':'Great Vibes','font-size':9,fill:'url(#g)'},s,'Thank You');
+ el('text',{x:33,y:29.5,'text-anchor':'middle','font-family':'Great Vibes','font-size':5.2,fill:'url(#g)'},s,'Firna & Ogi');
+ el('text',{x:33,y:34,'text-anchor':'middle','font-family':'Cormorant Garamond','font-weight':600,'font-size':2,'letter-spacing':.6,fill:'#f3e6d4'},s,'15 NOVEMBER 2026');
+ const sx=8,sy=40,sw=50,sh=148;
+ if(withStrip){el('rect',{x:sx+.4,y:sy+.6,width:sw,height:sh,fill:'#000','fill-opacity':.45,filter:'url(#blur)'},s);
+  el('image',{href:'strip-preview.png',x:sx,y:sy,width:sw,height:sh,preserveAspectRatio:'none'},s);
+  for(const[x,y,d]of[[sx,sy,1],[sx+sw,sy,-1]]){const g=el('g',{'clip-path':'url(#cp)'},s);
+   el('path',{d:`M${x-d*1} ${y-1} L${x+d*7} ${y-1} L${x-d*1} ${y+7} Z`,fill:'url(#bg)'},g);
+   el('line',{x1:x+d*7,y1:y-1,x2:x-d*1,y2:y+7,stroke:'url(#g)','stroke-width':.25},s);}
+  const by=sy+sh;el('path',{d:`M${33-9} ${by+1} L${33-9} ${by-9} L${33+9} ${by-9} L${33+9} ${by+1} Z`,fill:'url(#bg)'},s);
+  bouquet(s,33,by-4,1);el('path',{d:`M${33-9} ${by+1} L${33-9} ${by-9} L${33+9} ${by-9} L${33+9} ${by+1}`,fill:'none',stroke:'url(#g)','stroke-width':.25},s);
+ }else{const L={stroke:'url(#g)','stroke-width':.3,fill:'none'};
+  el('line',{x1:sx,y1:sy+7,x2:sx+7,y2:sy-1,...L},s);el('line',{x1:sx+sw,y1:sy+7,x2:sx+sw-7,y2:sy-1,...L},s);
+  el('path',{d:`M${33-9} ${sy+sh+1} L${33-9} ${sy+sh-9} L${33+9} ${sy+sh-9} L${33+9} ${sy+sh+1}`,...L},s);
+  el('text',{x:33,y:115,'text-anchor':'middle','font-family':'Cormorant Garamond','font-weight':600,'font-size':2.4,'letter-spacing':.5,fill:'#f3e6d4','fill-opacity':.55},s,'SLOT STRIP 50 × 148 mm');}
+}
+draw('a',false);draw('b',true);
+</script></body></html>
