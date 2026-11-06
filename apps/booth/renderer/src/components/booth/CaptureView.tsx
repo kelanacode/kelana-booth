@@ -262,7 +262,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
       </aside>
     )}
 
-    <footer className="absolute inset-x-0 bottom-0 z-20 flex items-end justify-between gap-4 px-5 pb-5 sm:px-8 sm:pb-7">
+    <footer className="absolute inset-x-0 bottom-0 z-20 flex items-end justify-between gap-4 px-3 pb-3 sm:px-8 sm:pb-6 [@media(orientation:landscape)_and_(max-height:500px)]:px-3 [@media(orientation:landscape)_and_(max-height:500px)]:pb-2">
       {!isTimedFlow && (
         <nav
           className="mx-auto flex w-full max-w-[min(92vw,1200px)] items-center justify-center gap-2"
@@ -274,7 +274,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
               aria-label="Previous photo slots"
               disabled={!canScrollSlotsLeft}
               onClick={onScrollSlotsLeft}
-              className="flex h-10 w-10 shrink-0 items-center justify-center text-3xl text-white enabled:hover:bg-white/15 disabled:opacity-30"
+              className="flex h-8 w-8 shrink-0 items-center justify-center text-2xl sm:h-10 sm:w-10 sm:text-3xl [@media(orientation:landscape)_and_(max-height:500px)]:h-7 [@media(orientation:landscape)_and_(max-height:500px)]:w-7 text-white enabled:hover:bg-white/15 disabled:opacity-30"
             >
               ‹
             </button>
@@ -285,13 +285,13 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
             onScroll={onSlotStripScroll}
             className="min-w-0 flex-1 overflow-x-auto scroll-smooth"
           >
-            <div className="flex w-max min-w-full items-center justify-center gap-2 px-1">
+            <div className="flex w-max min-w-full items-center justify-center gap-1.5 px-1 sm:gap-2">
               {slots.map((slot) => (
                 <span
                   key={slot.slotNumber}
                   ref={slot.isCurrent ? activeSlotRef : null}
                   aria-current={slot.isCurrent ? 'step' : undefined}
-                  className={`flex shrink-0 flex-col items-center gap-1 border-b-4 px-2 py-2 text-xs font-bold sm:px-3 sm:py-3 ${
+                  className={`flex shrink-0 flex-col items-center gap-1 border-b-[3px] px-1 py-1 text-[10px] font-bold sm:px-1.5 sm:py-1.5 sm:text-xs [@media(orientation:landscape)_and_(max-height:500px)]:px-1 [@media(orientation:landscape)_and_(max-height:500px)]:py-0.5 ${
                     slot.isCurrent
                       ? 'border-white bg-white/20 text-white'
                       : slot.isComplete
@@ -303,7 +303,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
                     <img
                       src={slot.photoUrl}
                       alt={`Photo slot ${slot.slotNumber}`}
-                      className="h-24 w-auto max-w-40 object-contain sm:h-32 sm:max-w-56"
+                      className="h-14 w-auto max-w-24 object-contain sm:h-20 sm:max-w-32 lg:h-24 lg:max-w-40 [@media(orientation:landscape)_and_(max-height:500px)]:h-11 [@media(orientation:landscape)_and_(max-height:500px)]:max-w-20"
                       onLoad={(event) => {
                         const { naturalWidth, naturalHeight } = event.currentTarget;
                         if (naturalWidth > 0 && naturalHeight > 0) {
@@ -313,10 +313,10 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
                     />
                   ) : (
                     <span
-                      className="relative flex h-24 shrink-0 items-center justify-center border border-white/35 sm:h-32"
+                      className="relative flex h-14 shrink-0 items-center justify-center border border-white/35 sm:h-20 lg:h-24 [@media(orientation:landscape)_and_(max-height:500px)]:h-11"
                       style={{ aspectRatio: photoAspectRatio }}
                     >
-                      <span className="px-2 text-center text-white/60">
+                      <span className="px-1 text-center leading-tight text-white/60">
                         Photo slot {slot.slotNumber}
                       </span>
                     </span>
@@ -332,7 +332,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
               aria-label="Next photo slots"
               disabled={!canScrollSlotsRight}
               onClick={onScrollSlotsRight}
-              className="flex h-10 w-10 shrink-0 items-center justify-center text-3xl text-white enabled:hover:bg-white/15 disabled:opacity-30"
+              className="flex h-8 w-8 shrink-0 items-center justify-center text-2xl sm:h-10 sm:w-10 sm:text-3xl [@media(orientation:landscape)_and_(max-height:500px)]:h-7 [@media(orientation:landscape)_and_(max-height:500px)]:w-7 text-white enabled:hover:bg-white/15 disabled:opacity-30"
             >
               ›
             </button>
