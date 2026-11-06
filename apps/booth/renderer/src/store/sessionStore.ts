@@ -85,6 +85,8 @@ export interface SessionStore {
   requestStart: () => void;
   /** Start-screen tap while the queue has a guest in line: serve that ticket. */
   startForQueueTicket: (ticketId: string, frameId: string | null) => void;
+  /** Session unlocked: a queued guest with a frame goes straight to shooting, else the tutorial. */
+  _enterSession: () => void;
   /** A voucher was redeemed on the unlock screen: start the session. */
   unlockWithVoucher: (voucherId: string) => void;
   selectFrame: (frame: FrameConfig) => void;
@@ -171,10 +173,26 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   confirmPayment: () => {
-    set({
-      paymentConfirmed: true,
-      currentScreen: 'TUTORIAL',
-    });
+    set({ paymentConfirmed: true });
+    get()._enterSession();
+  },
+
+  _enterSession: () => {
+    const { queueFrameId, sessionId } = get();
+    if (!queueFrameId || useBoothConfig.getState().flowMode === 'timed') {
+      set({ currentScreen: 'TUTORIAL' });
+      return;
+    }
+    // The queued guest picked their frame on their phone while waiting: skip
+    // the tutorial and frame selection, straight to the photo session. If the
+    // frame can't be loaded (disabled, offline) fall back to the normal path.
+    void getFrameTemplate(queueFrameId)
+      .catch(() => null)
+      .then((frame) => {
+        if (get().sessionId !== sessionId) return;
+        if (frame) get().selectFrame(frame);
+        else set({ queueFrameId: null, currentScreen: 'TUTORIAL' });
+      });
   },
 
   requestStart: () => {
@@ -192,7 +210,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   unlockWithVoucher: (voucherId) => {
-    set({ voucherId, paymentConfirmed: true, currentScreen: 'TUTORIAL' });
+    set({ voucherId, paymentConfirmed: true });
+    get()._enterSession();
   },
 
   selectFrame: (frame) => {
@@ -237,20 +256,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   continueAfterTutorial: () => {
     if (useBoothConfig.getState().flowMode !== 'timed') {
-      const { queueFrameId, sessionId } = get();
-      if (!queueFrameId) {
-        set({ currentScreen: 'SELECT_FRAME' });
-        return;
-      }
-      // The queued guest already picked a frame on their phone: go straight
-      // to shooting. Falls back to the frame picker if it can't be loaded.
-      void getFrameTemplate(queueFrameId)
-        .catch(() => null)
-        .then((frame) => {
-          if (get().sessionId !== sessionId) return;
-          if (frame) get().selectFrame(frame);
-          else set({ currentScreen: 'SELECT_FRAME' });
-        });
+      set({ currentScreen: 'SELECT_FRAME' });
       return;
     }
     // Timed flow: no frame at the booth (the guest picks it on the organize
