@@ -6,7 +6,7 @@ const candidatePorts = Array.from({ length: 20 }, (_, index) => preferPort + ind
 
 async function fetchHtml(port) {
   try {
-    const response = await fetch(`http://localhost:${port}/`, { signal: AbortSignal.timeout(1500) });
+    const response = await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1500) });
     const text = await response.text();
     return text;
   } catch {
@@ -36,7 +36,7 @@ async function start() {
 
   try {
     rendererPort = await findRendererPort();
-    console.log(`Renderer is up on http://localhost:${rendererPort}! Building Electron...`);
+    console.log(`Renderer is up on http://127.0.0.1:${rendererPort}! Building Electron...`);
   } catch (err) {
     console.error('Renderer did not start in time:', err.message || err);
     process.exit(1);
