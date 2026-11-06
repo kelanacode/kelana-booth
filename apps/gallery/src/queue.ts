@@ -337,6 +337,43 @@ function pagerWavUrl() {
 // touch the alarm is played for an instant (inside the silent lead-in) and
 // paused again; ringing later is then just play().
 var ringing = false;
+
+// Diagnostics: open /q?debug=1 to see what the audio is doing on the phone.
+var DEBUG = /[?&]debug=1/.test(location.search);
+var dbgLines = [];
+function dbg(msg) {
+  if (!DEBUG) return;
+  dbgLines.push(new Date().toLocaleTimeString() + ' ' + msg);
+  dbgLines = dbgLines.slice(-12);
+  renderDbg();
+}
+function renderDbg() {
+  if (!DEBUG) return;
+  var box = document.getElementById('dbg');
+  if (!box) {
+    box = document.createElement('pre');
+    box.id = 'dbg';
+    box.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99;margin:0;max-height:40vh;overflow:auto;' +
+      'background:rgba(0,0,0,.85);color:#0f0;font:11px/1.35 monospace;padding:8px;white-space:pre-wrap;';
+    document.body.appendChild(box);
+    var test = document.createElement('button');
+    test.textContent = 'Tes pager (bunyi 5 detik lagi)';
+    test.style.cssText = 'position:fixed;right:8px;bottom:calc(40vh + 8px);z-index:100;padding:10px 14px;border:0;border-radius:999px;' +
+      'background:#0f0;color:#000;font:bold 13px system-ui;';
+    test.onclick = function () {
+      dbg('test armed: rings in 5s with no touch');
+      setTimeout(function () { pagerAckNumber = null; startPager(0, 'Tes pager'); }, 5000);
+    };
+    document.body.appendChild(test);
+  }
+  var a = alarm;
+  box.textContent = 'stage=' + lastStage + ' unlocked=' + alertsUnlocked + ' ringing=' + ringing + ' pager=' + pagerOn +
+    '\\nalarm=' + (a ? 'paused=' + a.paused + ' muted=' + a.muted + ' ready=' + a.readyState + ' t=' + a.currentTime.toFixed(2) +
+      (a.error ? ' err=' + a.error.code : '') : 'none') +
+    ' audioCtx=' + (audioCtx ? audioCtx.state : 'none') + ' notif=' + notifPermission() + ' visible=' + !document.hidden +
+    '\\n' + dbgLines.join('\\n');
+}
+if (DEBUG) setInterval(renderDbg, 1000);
 function primeAlarm() {
   try {
     if (!alarm) {
@@ -347,12 +384,18 @@ function primeAlarm() {
     }
     if (ringing) return;
     alarm.muted = false;
-    alarm.currentTime = 0;
+    seek(0);
     var p = alarm.play();
-    var stop = function () { if (!ringing) { alarm.pause(); alarm.currentTime = 0; } };
-    if (p && p.then) p.then(stop, function () {});
+    var stop = function () { dbg('prime ok'); if (!ringing) { alarm.pause(); seek(0); } };
+    if (p && p.then) p.then(stop, function (err) { dbg('prime blocked: ' + (err && err.name)); });
     else stop();
-  } catch (e) {}
+  } catch (e) { dbg('prime error: ' + e.name); }
+}
+
+// Setting the position on audio that has not loaded yet throws in Safari
+// (iPhone never preloads). Never let that stop play() from being called.
+function seek(t) {
+  try { alarm.currentTime = t; } catch (e) {}
 }
 
 var alarmOffTimer = 0;
@@ -363,10 +406,10 @@ function soundAlarm(ms) {
   ringing = true;
   try {
     alarm.muted = false;
-    alarm.currentTime = ALARM_LEAD;
+    seek(ALARM_LEAD);
     var p = alarm.play();
-    if (p && p.catch) p.catch(function () { ringing = false; });
-  } catch (e) { ringing = false; return false; }
+    if (p && p.then) p.then(function () { dbg('ring ok'); }, function (err) { ringing = false; dbg('ring blocked: ' + (err && err.name)); });
+  } catch (e) { ringing = false; dbg('ring error: ' + e.name); return false; }
   if (ms) alarmOffTimer = setTimeout(silenceAlarm, ms);
   return true;
 }
@@ -374,7 +417,7 @@ function soundAlarm(ms) {
 function silenceAlarm() {
   clearTimeout(alarmOffTimer);
   ringing = false;
-  if (alarm) { try { alarm.pause(); alarm.currentTime = 0; } catch (e) {} }
+  if (alarm) { try { alarm.pause(); } catch (e) {} seek(0); }
 }
 
 function unlockAlerts() {
