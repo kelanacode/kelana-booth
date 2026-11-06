@@ -5,6 +5,7 @@ import { useBoothAppearance } from '../store/appearanceStore';
 import { usePhotoBoothCamera } from '../hooks/usePhotoBoothCamera';
 import { getSelectedPhotoUrls } from '../utils/photoSlots';
 import CaptureView from '../components/booth/CaptureView';
+import { transformPhotoUrl } from '../utils/photoTransform';
 
 export const PhotoCaptureScreen: React.FC = () => {
   const { currentPhotoSlot, sessionId, photoSlots, addPhotoAttempt, usePhoto, setScreen } =
@@ -51,6 +52,9 @@ export const PhotoCaptureScreen: React.FC = () => {
   /** When the last-second Live View teardown started (paces the tick to 0). */
   const prepareStartedAtRef = useRef(0);
   const [isMirrored, setIsMirrored] = useState(true);
+  // Read at shutter time so the saved photo matches what the guest saw.
+  const isMirroredRef = useRef(isMirrored);
+  isMirroredRef.current = isMirrored;
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraAttempt, setCameraAttempt] = useState(0);
@@ -244,7 +248,11 @@ export const PhotoCaptureScreen: React.FC = () => {
         ) {
           return;
         }
-        const dataUrl = result?.dataUrl;
+        let dataUrl = result?.dataUrl;
+        if (dataUrl && isMirroredRef.current) {
+          const raw = dataUrl;
+          dataUrl = await transformPhotoUrl(raw, 'flip').catch(() => raw);
+        }
         if (dataUrl) {
           commitCapture(dataUrl);
         } else {
@@ -266,9 +274,13 @@ export const PhotoCaptureScreen: React.FC = () => {
       const canvas = document.createElement('canvas');
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      // The mirror toggle only flips the on-screen preview. Saved photos stay
-      // true-to-life (like the Canon path) so text and logos print readable.
+      // The saved photo follows the mirror toggle: what the guest sees on
+      // screen is what they get.
       const context = canvas.getContext('2d');
+      if (context && isMirroredRef.current) {
+        context.translate(canvas.width, 0);
+        context.scale(-1, 1);
+      }
       context?.drawImage(video, 0, 0, canvas.width, canvas.height);
       commitCapture(canvas.toDataURL('image/jpeg', 0.92));
     } finally {
@@ -318,6 +330,10 @@ export const PhotoCaptureScreen: React.FC = () => {
       canvas.height = Math.max(1, Math.round(image.height * scale));
       const ctx = canvas.getContext('2d');
       if (!ctx) return null;
+      if (isMirroredRef.current) {
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+      }
       ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
       return canvas.toDataURL('image/jpeg', 0.8);
     }
@@ -331,6 +347,10 @@ export const PhotoCaptureScreen: React.FC = () => {
     canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
+    if (isMirroredRef.current) {
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL('image/jpeg', 0.8);
   }, [canonActive]);
