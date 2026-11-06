@@ -303,7 +303,7 @@ export const ContextBumperScreen: React.FC = () => {
   const [queue, refreshQueue] = useQueueState();
   const queueHead = queue.enabled ? queue.head : null;
   const requestStart = useCallback(() => {
-    if (queueHead) startForQueueTicket(queueHead.id);
+    if (queueHead) startForQueueTicket(queueHead.id, queueHead.frameId);
     else walkInStart();
   }, [queueHead, startForQueueTicket, walkInStart]);
 

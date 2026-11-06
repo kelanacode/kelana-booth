@@ -51,6 +51,18 @@ const mapFrameToRow = (frame: FrameConfig): Omit<FrameTemplateRow, 'enabled' | '
   templates_by_photo_slots: (frame.templatesByPhotoSlots as Record<string, FrameTemplateConfig> | undefined) ?? null,
 });
 
+/** One enabled template by id (a frame a queued guest picked on their phone). */
+export const getFrameTemplate = async (id: string): Promise<FrameConfig | null> => {
+  const { data, error } = await requireSupabase()
+    .from('frame_templates')
+    .select('*')
+    .eq('id', id)
+    .eq('enabled', true)
+    .maybeSingle();
+  if (error || !data) return null;
+  return mapRowToFrame(data as unknown as FrameTemplateRow);
+};
+
 /** Loads templates shared with the booth, ordered for display. */
 export const listFrameTemplates = async (): Promise<FrameConfig[]> => {
   const client = requireSupabase();

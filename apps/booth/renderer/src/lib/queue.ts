@@ -15,6 +15,8 @@ export interface QueueHead {
   id: string;
   number: number;
   status: 'waiting' | 'serving';
+  /** Frame the guest picked on their phone while waiting (null = pick at the booth). */
+  frameId: string | null;
 }
 
 export interface QueueBoothState {
@@ -29,11 +31,20 @@ export const fetchQueueState = async (): Promise<QueueBoothState> => {
   try {
     const { data, error } = await requireSupabase().rpc('queue_booth_state');
     if (error || !data) return DISABLED;
-    const raw = data as { enabled?: boolean; waiting?: number; head?: Partial<QueueHead> | null };
+    const raw = data as {
+      enabled?: boolean;
+      waiting?: number;
+      head?: { id?: unknown; number?: unknown; status?: unknown; frame_id?: unknown } | null;
+    };
     if (!raw.enabled) return DISABLED;
     const head =
       raw.head && typeof raw.head.id === 'string' && typeof raw.head.number === 'number'
-        ? { id: raw.head.id, number: raw.head.number, status: raw.head.status === 'serving' ? 'serving' : 'waiting' } as QueueHead
+        ? {
+            id: raw.head.id,
+            number: raw.head.number,
+            status: raw.head.status === 'serving' ? 'serving' : 'waiting',
+            frameId: typeof raw.head.frame_id === 'string' ? raw.head.frame_id : null,
+          } as QueueHead
         : null;
     return { enabled: true, head, waiting: Number(raw.waiting ?? 0) };
   } catch {

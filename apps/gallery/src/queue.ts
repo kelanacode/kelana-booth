@@ -48,6 +48,22 @@ export const renderQueuePage = (params: { theme: BoothTheme }): string => {
   .btn.ghost { background:transparent; color:#fff; border:1px solid rgb(255 255 255 / .3); font-size:.85rem; padding:10px 18px; }
   .hint { margin-top:16px; font-size:.78rem; opacity:.55; line-height:1.5; }
   .hidden { display:none !important; }
+  .fsec { margin-top:20px; padding:14px; border-radius:18px; background:rgb(255 255 255 / .06); display:flex; align-items:center; gap:12px; text-align:left; }
+  .fsec img { width:56px; height:84px; object-fit:contain; border-radius:8px; background:rgb(0 0 0 / .25); flex-shrink:0; }
+  .fsec .ft { flex:1; min-width:0; }
+  .fsec .ft b { display:block; font-size:.95rem; }
+  .fsec .ft span { font-size:.75rem; opacity:.6; }
+  .fsec .btn { margin:0; padding:9px 14px; font-size:.8rem; }
+  .sheet { position:fixed; inset:0; z-index:10; background:rgb(0 0 0 / .7); display:flex; align-items:flex-end; justify-content:center; }
+  .sheet-box { width:min(100vw,560px); max-height:88vh; overflow:auto; padding:20px 16px 28px; border-radius:24px 24px 0 0;
+    background:var(--pbx-ui-panel); }
+  .sheet-box h2 { margin:0 0 4px; font-size:1.1rem; }
+  .sheet-box p { margin:0 0 14px; font-size:.8rem; opacity:.6; }
+  .fgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:12px; }
+  .fopt { border:2px solid transparent; border-radius:16px; padding:8px; background:rgb(255 255 255 / .06); color:#fff; cursor:pointer; font:inherit; }
+  .fopt.sel { border-color:var(--pbx-ui-hi); }
+  .fopt img { width:100%; aspect-ratio:2/3; object-fit:contain; border-radius:10px; background:rgb(0 0 0 / .25); }
+  .fopt span { display:block; margin-top:6px; font-size:.78rem; font-weight:700; }
   @keyframes pulse { 0%,100% { transform:scale(1) } 50% { transform:scale(1.06) } }
   .pulse { animation:pulse 1.2s ease-in-out infinite; }
 </style>
@@ -57,6 +73,14 @@ export const renderQueuePage = (params: { theme: BoothTheme }): string => {
   <h1>Antrian Photobooth</h1>
   <div id="view"><p class="msg">Memuat&hellip;</p></div>
 </main>
+<div class="sheet hidden" id="sheet">
+  <div class="sheet-box">
+    <h2>Pilih frame</h2>
+    <p>Frame ini langsung dipakai saat giliranmu di booth.</p>
+    <div class="fgrid" id="fgrid"></div>
+    <button class="btn ghost" id="sheetClose" type="button">Tutup</button>
+  </div>
+</div>
 <script>
 var DEVICE_KEY = 'kq_device';
 var TICKET_KEY = 'kq_ticket';
@@ -85,6 +109,72 @@ function api(path, method) {
   return fetch(path, { method: method || 'GET', headers: { 'content-type': 'application/json' },
     body: method === 'POST' ? JSON.stringify({ device: deviceId() }) : undefined })
     .then(function (r) { return r.json(); });
+}
+
+var frames = null;
+var current = null;
+
+function loadFrames() {
+  if (frames) return Promise.resolve(frames);
+  return fetch('/api/queue/frames').then(function (r) { return r.json(); })
+    .then(function (list) { frames = Array.isArray(list) ? list : []; return frames; })
+    .catch(function () { return []; });
+}
+
+function esc(text) {
+  return String(text).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function frameById(id) {
+  if (!frames || !id) return null;
+  for (var i = 0; i < frames.length; i++) if (frames[i].id === id) return frames[i];
+  return null;
+}
+
+function frameSection(s) {
+  if (!frames || frames.length === 0) return '';
+  var canPick = s.status === 'waiting' || s.status === 'skipped';
+  var f = frameById(s.frame_id);
+  if (!f && !canPick) return '';
+  return '<div class="fsec">' +
+    (f ? '<img src="' + esc(f.preview_url) + '" alt=""/>' : '') +
+    '<div class="ft"><b>' + (f ? esc(f.name) : 'Belum pilih frame') + '</b><span>' +
+    (f ? 'Frame pilihanmu' : 'Pilih sambil menunggu, biar di booth langsung foto') + '</span></div>' +
+    (canPick ? '<button class="btn" id="pickFrame" type="button">' + (f ? 'Ganti' : 'Pilih frame') + '</button>' : '') +
+    '</div>';
+}
+
+function wireFrameButton() {
+  var b = document.getElementById('pickFrame');
+  if (b) b.onclick = openSheet;
+}
+
+function openSheet() {
+  var grid = document.getElementById('fgrid');
+  grid.innerHTML = frames.map(function (f) {
+    return '<button class="fopt' + (current && current.frame_id === f.id ? ' sel' : '') + '" type="button" data-id="' + esc(f.id) + '">' +
+      '<img src="' + esc(f.preview_url) + '" alt="" loading="lazy"/><span>' + esc(f.name) + '</span></button>';
+  }).join('');
+  grid.querySelectorAll('.fopt').forEach(function (btn) {
+    btn.onclick = function () { chooseFrame(btn.getAttribute('data-id')); };
+  });
+  document.getElementById('sheet').classList.remove('hidden');
+}
+
+function closeSheet() { document.getElementById('sheet').classList.add('hidden'); }
+
+function chooseFrame(id) {
+  var ticket = load(TICKET_KEY);
+  if (!ticket) return;
+  fetch('/api/queue/frame/' + encodeURIComponent(ticket), {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ frame: id }),
+  }).then(function (r) { return r.json(); }).then(function (res) {
+    closeSheet();
+    if (res && res.ok) { if (current) current.frame_id = id; poll(); }
+    else alert('Frame tidak bisa dipilih lagi (sesi sudah dimulai).');
+  }).catch(function () { alert('Gagal menyimpan frame, coba lagi.'); });
 }
 
 function view(html) { document.getElementById('view').innerHTML = html; }
@@ -141,7 +231,8 @@ function render(s) {
   if (s.status === 'skipped') {
     view(html + '<p class="msg">Nomormu terlewat karena belum datang saat dipanggil.</p>' +
       '<button class="btn" id="rejoin" type="button">Masuk antrian lagi</button>' +
-      '<p class="hint">Kamu akan ditempatkan tepat setelah antrian berikutnya.</p>');
+      '<p class="hint">Kamu akan ditempatkan tepat setelah antrian berikutnya.</p>' + frameSection(s));
+    wireFrameButton();
     document.getElementById('rejoin').onclick = function () {
       this.disabled = true;
       api('/api/queue/rejoin/' + encodeURIComponent(load(TICKET_KEY)), 'POST').then(function () { lastStage = ''; poll(); });
@@ -167,10 +258,11 @@ function render(s) {
     '<div class="stat"><b>' + (s.now_number != null ? s.now_number : '-') + '</b><span>Sekarang</span></div>' +
     '<div class="stat"><b>' + s.ahead + '</b><span>Antrian lagi</span></div>' +
     (eta ? '<div class="stat"><b style="font-size:1.1rem;line-height:1.9rem">' + eta + '</b><span>Estimasi</span></div>' : '') +
-    '</div>' + msg +
+    '</div>' + msg + frameSection(s) +
     (!s.enabled ? '<p class="hint">Antrian sedang dijeda oleh petugas.</p>' : '') +
     '<p class="hint">Biarkan halaman ini terbuka agar HP bergetar saat giliranmu dekat.</p>';
   view(html);
+  wireFrameButton();
   if (stage !== 'wait') {
     alertGuest(stage, stage === 'now' ? 'Giliranmu sekarang! Silakan ke booth.' :
       stage === 'next' ? 'Kamu berikutnya, ke booth sekarang.' : 'Giliranmu sebentar lagi.');
@@ -188,12 +280,16 @@ function poll() {
       .catch(function () { showTake(); });
     return;
   }
-  api('/api/queue/status/' + encodeURIComponent(ticket)).then(function (s) {
+  Promise.all([api('/api/queue/status/' + encodeURIComponent(ticket)), loadFrames()]).then(function (res) {
+    var s = res[0];
     if (!s || !s.ok) { store(TICKET_KEY, null); showTake(); return; }
+    current = s;
     if (render(s)) schedule();
   }).catch(function () { schedule(); });
 }
 
+document.getElementById('sheetClose').onclick = closeSheet;
+document.getElementById('sheet').addEventListener('click', function (e) { if (e.target.id === 'sheet') closeSheet(); });
 document.addEventListener('visibilitychange', function () { if (!document.hidden && load(TICKET_KEY)) poll(); });
 poll();
 </script>

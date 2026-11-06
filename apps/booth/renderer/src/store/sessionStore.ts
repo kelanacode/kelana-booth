@@ -11,6 +11,7 @@ import { getSelectedPhotoUrls } from '../utils/photoSlots';
 import { transformPhotoUrl, type PhotoTransform } from '../utils/photoTransform';
 import type { GifAdjust } from '../utils/gifAdjust';
 import { markQueueDone, markQueueStarted } from '../lib/queue';
+import { getFrameTemplate } from '../lib/frames';
 
 export type ScreenName =
   | 'CONTEXT_BUMPER'
@@ -44,6 +45,8 @@ export interface SessionStore {
    * completing the whole run advances the queue; cancelling never does.
    */
   queueTicketId: string | null;
+  /** Frame that queued guest picked on their phone; skips frame selection. */
+  queueFrameId: string | null;
   /**
    * The photos exactly as captured (selected shot per slot, capture order),
    * taken before Organize rotates / mirrors / reorders them. The GIF uses these.
@@ -81,7 +84,7 @@ export interface SessionStore {
   /** Start-screen tap: straight in when the booth is open, else the unlock screen. */
   requestStart: () => void;
   /** Start-screen tap while the queue has a guest in line: serve that ticket. */
-  startForQueueTicket: (ticketId: string) => void;
+  startForQueueTicket: (ticketId: string, frameId: string | null) => void;
   /** A voucher was redeemed on the unlock screen: start the session. */
   unlockWithVoucher: (voucherId: string) => void;
   selectFrame: (frame: FrameConfig) => void;
@@ -126,6 +129,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   paymentConfirmed: false,
   voucherId: null,
   queueTicketId: null,
+  queueFrameId: null,
   originalPhotos: [],
   gifFrame: null,
   setGifFrame: (gifFrame) => set({ gifFrame }),
@@ -151,6 +155,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       paymentConfirmed: false,
       voucherId: null,
       queueTicketId: null,
+      queueFrameId: null,
       originalPhotos: [],
       gifFrame: null,
       gifAdjust: null,
@@ -180,8 +185,8 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     get().confirmPayment();
   },
 
-  startForQueueTicket: (ticketId) => {
-    set({ queueTicketId: ticketId });
+  startForQueueTicket: (ticketId, frameId) => {
+    set({ queueTicketId: ticketId, queueFrameId: frameId });
     void markQueueStarted(ticketId);
     get().requestStart();
   },
@@ -232,7 +237,20 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
 
   continueAfterTutorial: () => {
     if (useBoothConfig.getState().flowMode !== 'timed') {
-      set({ currentScreen: 'SELECT_FRAME' });
+      const { queueFrameId, sessionId } = get();
+      if (!queueFrameId) {
+        set({ currentScreen: 'SELECT_FRAME' });
+        return;
+      }
+      // The queued guest already picked a frame on their phone: go straight
+      // to shooting. Falls back to the frame picker if it can't be loaded.
+      void getFrameTemplate(queueFrameId)
+        .catch(() => null)
+        .then((frame) => {
+          if (get().sessionId !== sessionId) return;
+          if (frame) get().selectFrame(frame);
+          else set({ currentScreen: 'SELECT_FRAME' });
+        });
       return;
     }
     // Timed flow: no frame at the booth (the guest picks it on the organize

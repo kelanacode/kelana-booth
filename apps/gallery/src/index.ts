@@ -396,6 +396,31 @@ async function handleQueueApi(request: Request, env: Env, pathname: string): Pro
     const res = await rpc(env, 'queue_status', { p_ticket: statusId });
     return res.ok ? json(res.data, noStore) : json({ ok: false, reason: 'offline' }, { status: 502 });
   }
+  if (request.method === 'GET' && pathname === '/api/queue/frames') {
+    const url = `${env.SUPABASE_URL.replace(/\/+$/, '')}/rest/v1/frame_templates?enabled=eq.true&select=id,name,preview_url,photo_slots&order=sort_order.asc,name.asc`;
+    try {
+      const response = await fetch(url, {
+        headers: { apikey: env.SUPABASE_PUBLISHABLE_KEY, Authorization: `Bearer ${env.SUPABASE_PUBLISHABLE_KEY}` },
+        cf: { cacheTtl: 60, cacheEverything: true },
+      });
+      return json(response.ok ? await response.json() : [], { headers: { 'cache-control': 'public, max-age=60' } });
+    } catch {
+      return json([], noStore);
+    }
+  }
+  const frameId = pathname.startsWith('/api/queue/frame/') ? pathname.slice('/api/queue/frame/'.length) : '';
+  if (request.method === 'POST' && frameId) {
+    if (!UUID_RE.test(frameId)) return json({ ok: false, reason: 'not_found' }, noStore);
+    let frame = '';
+    try {
+      const body = (await request.json()) as { frame?: unknown };
+      if (typeof body.frame === 'string') frame = body.frame.slice(0, 120);
+    } catch {
+      // no body: clears the pick
+    }
+    const res = await rpc(env, 'queue_set_frame', { p_ticket: frameId, p_frame: frame });
+    return res.ok ? json(res.data, noStore) : json({ ok: false, reason: 'offline' }, { status: 502 });
+  }
   const rejoinId = pathname.startsWith('/api/queue/rejoin/') ? pathname.slice('/api/queue/rejoin/'.length) : '';
   if (request.method === 'POST' && rejoinId) {
     if (!UUID_RE.test(rejoinId)) return json({ ok: false, reason: 'not_found' }, noStore);
