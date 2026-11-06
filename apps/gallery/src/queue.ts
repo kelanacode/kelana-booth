@@ -243,9 +243,11 @@ function unlockAlerts() {
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   } catch (e) {}
   alertsUnlocked = true;
-  try {
-    if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
-  } catch (e) {}
+}
+
+var NOTIF_SUPPORTED = 'Notification' in window;
+function notifPermission() {
+  try { return NOTIF_SUPPORTED ? Notification.permission : 'unsupported'; } catch (e) { return 'unsupported'; }
 }
 
 function notify(text) {
@@ -282,23 +284,48 @@ function alertGuest(stage, text) {
 
 // Auto-activate on the guest's first touch anywhere (tapping "Ambil Nomor"
 // or a frame counts). Browsers refuse sound/vibration before any touch.
+// Any touch unlocks sound/vibration silently; the notification permission is
+// only asked from the button, so no popup appears out of nowhere.
 function autoUnlock() {
   if (alertsUnlocked) return;
   unlockAlerts();
-  var hint = document.getElementById('touchHint');
-  if (hint) hint.remove();
 }
 ['pointerdown', 'touchstart', 'keydown'].forEach(function (type) {
   document.addEventListener(type, autoUnlock, { capture: true, passive: true });
 });
 
 function alertsCard() {
-  if (alertsUnlocked) return '';
-  return '<p class="hint" id="touchHint">🔔 Sentuh layar sekali agar HP bisa berbunyi' +
-    (CAN_VIBRATE ? ' &amp; bergetar' : '') + '.</p>';
+  var perm = notifPermission();
+  if (perm === 'default' || (perm === 'unsupported' && !alertsUnlocked)) {
+    return '<button class="btn" id="enableAlerts" type="button">🔔 Aktifkan ' +
+      (perm === 'unsupported' ? 'bunyi' : 'notifikasi') + '</button>' +
+      (perm === 'unsupported' && !CAN_VIBRATE
+        ? '<p class="hint">Di iPhone, pemberitahuan berupa bunyi selama halaman ini terbuka.</p>' : '');
+  }
+  if (perm === 'denied') {
+    return '<p class="hint">🔕 Notifikasi diblokir. Izinkan notifikasi untuk situs ini di pengaturan browser.</p>';
+  }
+  return '<p class="hint">✓ ' + (perm === 'granted' ? 'Notifikasi aktif' : 'Bunyi aktif') + '</p>';
 }
 
-function wireAlertsButton() {}
+function wireAlertsButton() {
+  var b = document.getElementById('enableAlerts');
+  if (!b) return;
+  b.onclick = function () {
+    unlockAlerts();
+    beep(1);
+    if (CAN_VIBRATE) navigator.vibrate(150);
+    var done = function () { poll(); };
+    try {
+      if (NOTIF_SUPPORTED && Notification.permission === 'default') {
+        var res = Notification.requestPermission(done);
+        if (res && res.then) res.then(done, done);
+        return;
+      }
+    } catch (e) {}
+    done();
+  };
+}
 
 function askNotify() {
   unlockAlerts();
@@ -381,7 +408,7 @@ function render(s) {
     '<div class="stat"><b>' + s.ahead + '</b><span>Antrian lagi</span></div>' +
     (eta ? '<div class="stat"><b style="font-size:1.1rem;line-height:1.9rem">' + eta + '</b><span>Estimasi</span></div>' : '') +
     '</div>' + (s.enabled ? msg : '<p class="msg">Antrian sedang dijeda oleh petugas. Nomormu tetap aman.</p>') +
-    frameSection(s) + alertsCard() +
+    alertsCard() + frameSection(s) +
     '<p class="hint">Biarkan halaman ini terbuka agar HP berbunyi' + (CAN_VIBRATE ? ' dan bergetar' : '') +
     ' saat giliranmu dekat.</p>';
   view(html);
