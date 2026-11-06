@@ -302,8 +302,12 @@ function beep(times) {
 // silent switch, unlike Web Audio.
 var alarm = null;
 
+// The WAV starts with a short silent lead-in, so the instant it plays while
+// being unlocked (see primeAlarm) is inaudible.
+var ALARM_LEAD = 0.3;
+
 function pagerWavUrl() {
-  var rate = 22050, seconds = PAGER_CYCLE;
+  var rate = 22050, seconds = ALARM_LEAD + PAGER_CYCLE;
   var n = Math.floor(rate * seconds);
   var buf = new ArrayBuffer(44 + n * 2);
   var v = new DataView(buf);
@@ -313,19 +317,27 @@ function pagerWavUrl() {
   v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
   w(36, 'data'); v.setUint32(40, n * 2, true);
   for (var i = 0; i < n; i++) {
-    var t = i / rate;
-    var k = Math.floor(t / 0.09);
+    var t = i / rate - ALARM_LEAD;
     var sample = 0;
-    if (k < 6 && t - k * 0.09 < 0.07) {
-      var f = k % 2 ? 3100 : 2600;
-      sample = Math.sin(2 * Math.PI * f * t) >= 0 ? 0.95 : -0.95;
+    if (t >= 0) {
+      var k = Math.floor(t / 0.09);
+      if (k < 6 && t - k * 0.09 < 0.07) {
+        var f = k % 2 ? 3100 : 2600;
+        sample = Math.sin(2 * Math.PI * f * t) >= 0 ? 0.95 : -0.95;
+      }
     }
     v.setInt16(44 + i * 2, sample * 32767, true);
   }
   return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
 }
 
-function startAlarmElement() {
+// Browsers only let a page start sound later, without a touch, if that same
+// audio element was really (unmuted) played during a touch. Muted playback
+// does not count, which is why an earlier version stayed silent. So on every
+// touch the alarm is played for an instant (inside the silent lead-in) and
+// paused again; ringing later is then just play().
+var ringing = false;
+function primeAlarm() {
   try {
     if (!alarm) {
       alarm = new Audio(pagerWavUrl());
@@ -333,9 +345,13 @@ function startAlarmElement() {
       alarm.preload = 'auto';
       alarm.setAttribute('playsinline', '');
     }
-    alarm.muted = true;
+    if (ringing) return;
+    alarm.muted = false;
+    alarm.currentTime = 0;
     var p = alarm.play();
-    if (p && p.catch) p.catch(function () {});
+    var stop = function () { if (!ringing) { alarm.pause(); alarm.currentTime = 0; } };
+    if (p && p.then) p.then(stop, function () {});
+    else stop();
   } catch (e) {}
 }
 
@@ -344,21 +360,21 @@ var alarmOffTimer = 0;
 function soundAlarm(ms) {
   if (!alarm) return false;
   clearTimeout(alarmOffTimer);
+  ringing = true;
   try {
-    alarm.currentTime = 0;
     alarm.muted = false;
-    if (alarm.paused) {
-      var p = alarm.play();
-      if (p && p.catch) p.catch(function () {});
-    }
-  } catch (e) { return false; }
+    alarm.currentTime = ALARM_LEAD;
+    var p = alarm.play();
+    if (p && p.catch) p.catch(function () { ringing = false; });
+  } catch (e) { ringing = false; return false; }
   if (ms) alarmOffTimer = setTimeout(silenceAlarm, ms);
-  return !alarm.paused;
+  return true;
 }
 
 function silenceAlarm() {
   clearTimeout(alarmOffTimer);
-  if (alarm) alarm.muted = true;
+  ringing = false;
+  if (alarm) { try { alarm.pause(); alarm.currentTime = 0; } catch (e) {} }
 }
 
 function unlockAlerts() {
@@ -367,13 +383,13 @@ function unlockAlerts() {
     if (Ctx && !audioCtx) audioCtx = new Ctx();
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   } catch (e) {}
-  startAlarmElement();
+  primeAlarm();
   alertsUnlocked = true;
 }
 
-// Keep the muted alarm running: if the browser paused it, any touch restarts it.
+// Re-prime on every touch so the permission stays fresh.
 document.addEventListener('pointerdown', function () {
-  if (alertsUnlocked && alarm && alarm.paused) startAlarmElement();
+  if (alertsUnlocked) primeAlarm();
 }, { capture: true, passive: true });
 
 var NOTIF_SUPPORTED = 'Notification' in window;
@@ -422,7 +438,7 @@ function schedulePager() {
 function pagerTick() {
   if (!pagerOn) return;
   // Primary: the looping <audio> alarm. Fallback: scheduled Web Audio trills.
-  if (alarm && !alarm.paused && !alarm.muted) {
+  if (ringing && alarm && !alarm.paused) {
     // already ringing
   } else if (!soundAlarm(0)) {
     try { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); } catch (e) {}
