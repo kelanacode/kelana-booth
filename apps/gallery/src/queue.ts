@@ -337,9 +337,23 @@ function render(s) {
     return false;
   }
   if (s.status === 'skipped') {
+    if (s.can_rejoin === false) {
+      // Rejoined once already and skipped again: back of the line.
+      view(html + '<p class="msg">Nomormu terlewat lagi.</p>' +
+        '<p class="hint">Kesempatan masuk antrian lagi hanya 1 kali. Silakan ambil nomor baru.</p>' +
+        '<button class="btn" id="fresh" type="button">Ambil nomor baru</button>');
+      document.getElementById('fresh').onclick = function () {
+        this.disabled = true;
+        api('/api/queue/take', 'POST').then(function (res) {
+          if (res && res.ok) { store(TICKET_KEY, res.ticket_id); lastStage = ''; }
+          poll();
+        }).catch(function () { poll(); });
+      };
+      return false;
+    }
     view(html + '<p class="msg">Nomormu terlewat karena belum datang saat dipanggil.</p>' +
       '<button class="btn" id="rejoin" type="button">Masuk antrian lagi</button>' +
-      '<p class="hint">Kamu akan ditempatkan tepat setelah antrian berikutnya.</p>' + frameSection(s));
+      '<p class="hint">Kamu akan ditempatkan tepat setelah antrian berikutnya. Kesempatan ini hanya 1 kali.</p>' + frameSection(s));
     wireFrameButton();
     document.getElementById('rejoin').onclick = function () {
       this.disabled = true;
