@@ -294,14 +294,87 @@ function beep(times) {
   } catch (e) {}
 }
 
+// iPhone Safari suspends Web Audio after the screen locks or the guest
+// switches apps, and only a touch can wake it again. So the alarm is a plain
+// <audio> element (a generated pager-trill WAV, looping) started muted on the
+// guest's first touch: once playing it needs no further touch, and turning
+// the sound on is just un-muting it. Media audio also ignores the iPhone
+// silent switch, unlike Web Audio.
+var alarm = null;
+
+function pagerWavUrl() {
+  var rate = 22050, seconds = PAGER_CYCLE;
+  var n = Math.floor(rate * seconds);
+  var buf = new ArrayBuffer(44 + n * 2);
+  var v = new DataView(buf);
+  var w = function (o, str) { for (var i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  w(36, 'data'); v.setUint32(40, n * 2, true);
+  for (var i = 0; i < n; i++) {
+    var t = i / rate;
+    var k = Math.floor(t / 0.09);
+    var sample = 0;
+    if (k < 6 && t - k * 0.09 < 0.07) {
+      var f = k % 2 ? 3100 : 2600;
+      sample = Math.sin(2 * Math.PI * f * t) >= 0 ? 0.95 : -0.95;
+    }
+    v.setInt16(44 + i * 2, sample * 32767, true);
+  }
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+
+function startAlarmElement() {
+  try {
+    if (!alarm) {
+      alarm = new Audio(pagerWavUrl());
+      alarm.loop = true;
+      alarm.preload = 'auto';
+      alarm.setAttribute('playsinline', '');
+    }
+    alarm.muted = true;
+    var p = alarm.play();
+    if (p && p.catch) p.catch(function () {});
+  } catch (e) {}
+}
+
+var alarmOffTimer = 0;
+// Sound the alarm for ms milliseconds (0 = until silenced); false if it cannot.
+function soundAlarm(ms) {
+  if (!alarm) return false;
+  clearTimeout(alarmOffTimer);
+  try {
+    alarm.currentTime = 0;
+    alarm.muted = false;
+    if (alarm.paused) {
+      var p = alarm.play();
+      if (p && p.catch) p.catch(function () {});
+    }
+  } catch (e) { return false; }
+  if (ms) alarmOffTimer = setTimeout(silenceAlarm, ms);
+  return !alarm.paused;
+}
+
+function silenceAlarm() {
+  clearTimeout(alarmOffTimer);
+  if (alarm) alarm.muted = true;
+}
+
 function unlockAlerts() {
   try {
     var Ctx = window.AudioContext || window.webkitAudioContext;
     if (Ctx && !audioCtx) audioCtx = new Ctx();
     if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   } catch (e) {}
+  startAlarmElement();
   alertsUnlocked = true;
 }
+
+// Keep the muted alarm running: if the browser paused it, any touch restarts it.
+document.addEventListener('pointerdown', function () {
+  if (alertsUnlocked && alarm && alarm.paused) startAlarmElement();
+}, { capture: true, passive: true });
 
 var NOTIF_SUPPORTED = 'Notification' in window;
 function notifPermission() {
@@ -320,7 +393,8 @@ function notify(text) {
 
 function fireAlert(stage, text) {
   if (CAN_VIBRATE) navigator.vibrate(stage === 'now' ? [500, 150, 500, 150, 500] : [300, 120, 300]);
-  beep(stage === 'now' ? 4 : 2);
+  // Two trills via the always-on <audio> alarm; Web Audio beep as a fallback.
+  if (!soundAlarm(PAGER_CYCLE * 2000)) beep(stage === 'now' ? 4 : 2);
   notify(text);
 }
 
@@ -347,8 +421,13 @@ function schedulePager() {
 
 function pagerTick() {
   if (!pagerOn) return;
-  try { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); } catch (e) {}
-  schedulePager();
+  // Primary: the looping <audio> alarm. Fallback: scheduled Web Audio trills.
+  if (alarm && !alarm.paused && !alarm.muted) {
+    // already ringing
+  } else if (!soundAlarm(0)) {
+    try { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); } catch (e) {}
+    schedulePager();
+  }
   if (CAN_VIBRATE) navigator.vibrate([600, 200, 600]);
 }
 
@@ -366,6 +445,7 @@ function stopPager() {
   if (!pagerOn) return;
   pagerOn = false;
   clearInterval(pagerTimer);
+  silenceAlarm();
   pagerNodes.forEach(function (osc) { try { osc.stop(); } catch (e) {} });
   pagerNodes = [];
   pagerScheduledTo = 0;
