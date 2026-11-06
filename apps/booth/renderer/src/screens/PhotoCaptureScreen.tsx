@@ -557,7 +557,8 @@ export const PhotoCaptureScreen: React.FC = () => {
           slotNumber: slot.slotNumber,
           isCurrent: slot.slotNumber === currentPhotoSlot,
           isComplete: Boolean(slot.selectedAttempt),
-          photoUrl: selectedPhotoUrls[index],
+          // Only accepted photos fill the strip; a retaken shot never shows.
+          photoUrl: slot.selectedAttempt ? selectedPhotoUrls[index] : undefined,
         }))}
         latestPhoto={latestPhoto}
         showPhotoSlotArrows={showPhotoSlotArrows}
