@@ -1,12 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   BoothEvent,
   BoothEventInput,
   createEvent,
   deleteEvent,
   setActiveEvent,
+  setQueueEnabled,
   updateEvent,
 } from '../../lib/events';
+import { GALLERY_URL } from '../../config';
+import { generateQrDataUrl } from '../../utils/qr';
 import { Modal, ConfirmModal } from './Modal';
 import { IconPencil, IconPlus, IconTrash } from './AdminIcons';
 
@@ -46,6 +49,14 @@ export const EventsManager: React.FC<EventsManagerProps> = ({ open, events, coun
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<BoothEvent | null>(null);
+  // Guest queue QR (one fixed link: it always serves the active event).
+  const queueUrl = GALLERY_URL ? `${GALLERY_URL}/q` : null;
+  const queueLive = events.some((event) => event.is_active && event.queue_enabled);
+  const [queueQr, setQueueQr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!queueUrl || !queueLive) return;
+    void generateQrDataUrl(queueUrl, 512).then(setQueueQr).catch(() => setQueueQr(null));
+  }, [queueUrl, queueLive]);
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -199,6 +210,18 @@ export const EventsManager: React.FC<EventsManagerProps> = ({ open, events, coun
                   </p>
                 </div>
                 <button
+                  className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition disabled:opacity-50 ${
+                    event.queue_enabled
+                      ? 'border-pbx-ui-hi/60 bg-pbx-ui-hi/15 text-pbx-ui-hi'
+                      : 'border-white/10 text-white/60 hover:bg-white/10'
+                  }`}
+                  onClick={() => void run(() => setQueueEnabled(event.id, !event.queue_enabled))}
+                  disabled={busy}
+                  title="Guest queue: guests scan a QR to take a number"
+                >
+                  {event.queue_enabled ? 'Queue on' : 'Queue off'}
+                </button>
+                <button
                   className="shrink-0 rounded-full border border-white/10 px-3 py-1 text-xs font-medium text-white/75 transition hover:bg-white/10 disabled:opacity-50"
                   onClick={() => void run(() => setActiveEvent(event.is_active ? null : event.id))}
                   disabled={busy}
@@ -223,6 +246,29 @@ export const EventsManager: React.FC<EventsManagerProps> = ({ open, events, coun
                 </button>
               </div>
             ),
+          )}
+
+          {queueLive && queueUrl && (
+            <div className="mt-4 flex items-center gap-4 rounded-xl border border-pbx-ui-hi/40 bg-pbx-ui-hi/10 p-4">
+              {queueQr && <img src={queueQr} alt="Queue QR" className="h-28 w-28 shrink-0 rounded-lg bg-white p-1" />}
+              <div className="min-w-0 text-sm">
+                <p className="font-semibold text-white">Guest queue QR</p>
+                <p className="mt-1 text-white/60">
+                  Print this and place it near the booth. Guests scan it to take a number. It always serves the
+                  active event.
+                </p>
+                <p className="mt-2 break-all font-mono text-xs text-pbx-ui-hi">{queueUrl}</p>
+                {queueQr && (
+                  <a
+                    href={queueQr}
+                    download="queue-qr.png"
+                    className="mt-2 inline-block rounded-full bg-pbx-ui-hi px-3 py-1 text-xs font-semibold text-pbx-ui-hi-fg"
+                  >
+                    Download QR
+                  </a>
+                )}
+              </div>
+            </div>
           )}
 
           {events.length === 0 && editingId !== 'new' && (

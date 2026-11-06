@@ -12,6 +12,8 @@ export interface BoothEvent {
   ends_on: string | null;
   notes: string;
   is_active: boolean;
+  /** Guest queue on/off (runs only while the event is also active). */
+  queue_enabled: boolean;
   created_at: string;
 }
 
@@ -29,6 +31,7 @@ const mapEventRow = (row: Record<string, unknown>): BoothEvent => ({
   ends_on: typeof row.ends_on === 'string' ? row.ends_on : null,
   notes: String(row.notes ?? ''),
   is_active: Boolean(row.is_active),
+  queue_enabled: Boolean(row.queue_enabled),
   created_at: String(row.created_at ?? ''),
 });
 
@@ -89,5 +92,12 @@ export const assignSessionsToEvent = async (tokens: string[], eventId: string | 
   if (tokens.length === 0) return;
   const client = requireSupabase();
   const { error } = await client.from('sessions').update({ event_id: eventId }).in('token', tokens);
+  if (error) throw new Error(error.message);
+};
+
+/** Switches the guest queue (antrian) on or off for an event. */
+export const setQueueEnabled = async (id: string, enabled: boolean): Promise<void> => {
+  const client = requireSupabase();
+  const { error } = await client.from('events').update({ queue_enabled: enabled }).eq('id', id);
   if (error) throw new Error(error.message);
 };

@@ -11,6 +11,8 @@ import StartCameraFeed from '../components/booth/startScreen/StartCameraFeed';
 import WeddingRomanceView from '../components/booth/startScreen/WeddingRomanceView';
 import HauntedNightView from '../components/booth/startScreen/HauntedNightView';
 import KliwonNightView from '../components/booth/startScreen/KliwonNightView';
+import QueuePanel from '../components/booth/QueuePanel';
+import { skipQueueTicket, useQueueState } from '../lib/queue';
 
 type Flavor = 'pink' | 'lime';
 
@@ -295,7 +297,15 @@ const Gradient3DStart: React.FC<{ onAdvance: () => void; onOpenPin: () => void }
  */
 export const ContextBumperScreen: React.FC = () => {
   // Straight into the session, or to the voucher unlock screen when locked.
-  const requestStart = useSessionStore((state) => state.requestStart);
+  const walkInStart = useSessionStore((state) => state.requestStart);
+  const startForQueueTicket = useSessionStore((state) => state.startForQueueTicket);
+  // Guest queue: while someone is in line, the start tap serves their number.
+  const [queue, refreshQueue] = useQueueState();
+  const queueHead = queue.enabled ? queue.head : null;
+  const requestStart = useCallback(() => {
+    if (queueHead) startForQueueTicket(queueHead.id);
+    else walkInStart();
+  }, [queueHead, startForQueueTicket, walkInStart]);
 
   // Re-check the global access / print mode before each new guest.
   useEffect(() => {
@@ -391,6 +401,18 @@ export const ContextBumperScreen: React.FC = () => {
         />
       ) : (
         <Gradient3DStart onAdvance={requestStart} onOpenPin={openPin} />
+      )}
+
+      {queueHead && (
+        <QueuePanel
+          theme={theme}
+          head={queueHead}
+          onSkip={async () => {
+            await skipQueueTicket(queueHead.id);
+            await refreshQueue();
+          }}
+          onWalkIn={walkInStart}
+        />
       )}
 
       {/* Admin PIN modal — gate to camera settings */}

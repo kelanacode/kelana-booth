@@ -156,6 +156,10 @@ export const renderGallery = (params: {
   .contact-wa { background:#25D366; color:#073B1C; }
   .contact-ig { background:linear-gradient(45deg,#F58529,#DD2A7B 55%,#8134AF); color:#fff; }
   footer { text-align:center; margin-top:28px; opacity:.55; font-size:.8rem; }
+  .gprint { display:inline-flex; align-items:center; gap:6px; margin-top:6px; padding:3px 10px; border-radius:999px; font-size:.75rem; font-weight:700; background:rgba(255,255,255,.08); }
+  .gprint.ok { background:rgb(var(--pbx-ui-hi-rgb, 190 242 100) / .18); color:var(--pbx-ui-hi); }
+  .gprint.err { background:rgba(255,94,135,.15); color:#ff8aa8; }
+  .gprint:empty { display:none; }
 </style>
 </head>
 <body>
@@ -170,6 +174,7 @@ export const renderGallery = (params: {
       <div class="gtitles">
         <h1 class="gtitle">Hasil Foto Mu</h1>
         <p class="gsub"><span id="tokenText"></span><span class="sep">&middot;</span><span id="timeText"></span></p>
+        <span class="gprint" id="printPill"></span>
       </div>
     </div>
   </header>
@@ -711,8 +716,31 @@ async function main() {
   }
   setTimeout(main, POLL_MS);
 }
+// Print status (sessions.print_status via the Worker). Polled until final.
+const PRINT_LABELS = {
+  success: ['ok', '\u2713 Sudah dicetak'],
+  printing: ['', 'Sedang dicetak\u2026'],
+  queued: ['', 'Menunggu antrean cetak'],
+  ready_to_print: ['', 'Menunggu antrean cetak'],
+  error: ['err', 'Gagal dicetak, hubungi petugas'],
+};
+function pollPrint() {
+  fetch('/api/sessions/' + TOKEN + '/print')
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (data) {
+      const pill = document.getElementById('printPill');
+      const label = data && PRINT_LABELS[data.print_status];
+      if (pill) {
+        pill.className = 'gprint' + (label && label[0] ? ' ' + label[0] : '');
+        pill.textContent = label ? label[1] : '';
+      }
+      if (!data || data.print_status !== 'success') setTimeout(pollPrint, 8000);
+    })
+    .catch(function () { setTimeout(pollPrint, 8000); });
+}
 initHead();
 main();
+pollPrint();
 </script>
 </body>
 </html>`;

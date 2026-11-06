@@ -1,6 +1,7 @@
 import { DEFAULT_BOOTH_APPEARANCE, type BoothTheme } from '@photo-booth/types';
 import { renderGallery } from './gallery';
 import { qrSvgDataUrl } from './qr';
+import { renderQueuePage } from './queue';
 
 export interface Env {
   GALLERY_BUCKET: R2Bucket;
@@ -348,6 +349,62 @@ async function handleGetFrame(env: Env, id: string): Promise<Response> {
   }
 }
 
+/** Calls a Supabase database function as anon (publishable key). */
+async function rpc(env: Env, fn: string, args: Record<string, unknown>): Promise<{ ok: boolean; data: unknown }> {
+  const url = `${env.SUPABASE_URL.replace(/\/+$/, '')}/rest/v1/rpc/${fn}`;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        apikey: env.SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${env.SUPABASE_PUBLISHABLE_KEY}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(args),
+    });
+    if (!response.ok) return { ok: false, data: null };
+    return { ok: true, data: await response.json() };
+  } catch {
+    return { ok: false, data: null };
+  }
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Guest queue API behind the /q page (see the 20261106000000_queue migration). */
+async function handleQueueApi(request: Request, env: Env, pathname: string): Promise<Response> {
+  const noStore = { headers: { 'cache-control': 'no-store' } };
+  if (request.method === 'GET' && pathname === '/api/queue/active') {
+    const res = await rpc(env, 'queue_booth_state', {});
+    const enabled = Boolean((res.data as { enabled?: boolean } | null)?.enabled);
+    return json({ enabled }, noStore);
+  }
+  if (request.method === 'POST' && pathname === '/api/queue/take') {
+    let device = '';
+    try {
+      const body = (await request.json()) as { device?: unknown };
+      if (typeof body.device === 'string') device = body.device;
+    } catch {
+      // invalid body: the database rejects the empty device id
+    }
+    const res = await rpc(env, 'queue_take', { p_device: device });
+    return res.ok ? json(res.data, noStore) : json({ ok: false, reason: 'offline' }, { status: 502 });
+  }
+  const statusId = pathname.startsWith('/api/queue/status/') ? pathname.slice('/api/queue/status/'.length) : '';
+  if (request.method === 'GET' && statusId) {
+    if (!UUID_RE.test(statusId)) return json({ ok: false, reason: 'not_found' }, noStore);
+    const res = await rpc(env, 'queue_status', { p_ticket: statusId });
+    return res.ok ? json(res.data, noStore) : json({ ok: false, reason: 'offline' }, { status: 502 });
+  }
+  const rejoinId = pathname.startsWith('/api/queue/rejoin/') ? pathname.slice('/api/queue/rejoin/'.length) : '';
+  if (request.method === 'POST' && rejoinId) {
+    if (!UUID_RE.test(rejoinId)) return json({ ok: false, reason: 'not_found' }, noStore);
+    const res = await rpc(env, 'queue_rejoin', { p_ticket: rejoinId });
+    return res.ok ? json(res.data, noStore) : json({ ok: false, reason: 'offline' }, { status: 502 });
+  }
+  return json({ error: 'Not found' }, { status: 404 });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -356,6 +413,30 @@ export default {
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders() });
+    }
+
+    // Guest queue page + API.
+    if (request.method === 'GET' && (pathname === '/q' || pathname === '/q/')) {
+      const theme = await fetchBoothTheme(env);
+      return new Response(renderQueuePage({ theme }), {
+        headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+      });
+    }
+    if (pathname.startsWith('/api/queue/')) {
+      return handleQueueApi(request, env, pathname);
+    }
+
+    // Print status for the gallery page: /api/sessions/:token/print
+    if (request.method === 'GET' && pathname.startsWith('/api/sessions/') && pathname.endsWith('/print')) {
+      const token = pathname.slice('/api/sessions/'.length, -'/print'.length);
+      if (!token) {
+        return json({ error: 'Missing token' }, { status: 400 });
+      }
+      const res = await rpc(env, 'session_print_status', { p_token: token });
+      return json(
+        { print_status: typeof res.data === 'string' ? res.data : null },
+        { headers: { 'cache-control': 'no-store' } },
+      );
     }
 
     // Reserve a session (QR-ready) and, optionally, accept bundled outputs.

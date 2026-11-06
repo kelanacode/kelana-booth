@@ -10,6 +10,7 @@ import { GALLERY_URL } from '../config';
 import { getSelectedPhotoUrls } from '../utils/photoSlots';
 import { transformPhotoUrl, type PhotoTransform } from '../utils/photoTransform';
 import type { GifAdjust } from '../utils/gifAdjust';
+import { markQueueDone, markQueueStarted } from '../lib/queue';
 
 export type ScreenName =
   | 'CONTEXT_BUMPER'
@@ -38,6 +39,11 @@ export interface SessionStore {
   paymentConfirmed: boolean;
   /** Voucher redeemed to start this session (voucher-locked booths only). */
   voucherId: string | null;
+  /**
+   * Guest queue ticket this session serves (null = walk-in / queue off). Only
+   * completing the whole run advances the queue; cancelling never does.
+   */
+  queueTicketId: string | null;
   /**
    * The photos exactly as captured (selected shot per slot, capture order),
    * taken before Organize rotates / mirrors / reorders them. The GIF uses these.
@@ -74,6 +80,8 @@ export interface SessionStore {
   confirmPayment: () => void;
   /** Start-screen tap: straight in when the booth is open, else the unlock screen. */
   requestStart: () => void;
+  /** Start-screen tap while the queue has a guest in line: serve that ticket. */
+  startForQueueTicket: (ticketId: string) => void;
   /** A voucher was redeemed on the unlock screen: start the session. */
   unlockWithVoucher: (voucherId: string) => void;
   selectFrame: (frame: FrameConfig) => void;
@@ -117,6 +125,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   photoSlots: [],
   paymentConfirmed: false,
   voucherId: null,
+  queueTicketId: null,
   originalPhotos: [],
   gifFrame: null,
   setGifFrame: (gifFrame) => set({ gifFrame }),
@@ -141,6 +150,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       photoSlots: [],
       paymentConfirmed: false,
       voucherId: null,
+      queueTicketId: null,
       originalPhotos: [],
       gifFrame: null,
       gifAdjust: null,
@@ -168,6 +178,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       return;
     }
     get().confirmPayment();
+  },
+
+  startForQueueTicket: (ticketId) => {
+    set({ queueTicketId: ticketId });
+    void markQueueStarted(ticketId);
+    get().requestStart();
   },
 
   unlockWithVoucher: (voucherId) => {
@@ -501,6 +517,12 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   completeSession: () => {
+    const { queueTicketId } = get();
+    if (queueTicketId) {
+      // The numbered guest's whole run is done: this is what advances the queue.
+      void markQueueDone(queueTicketId);
+      set({ queueTicketId: null });
+    }
     set({ currentScreen: 'COMPLETE' });
   },
 
