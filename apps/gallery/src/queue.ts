@@ -50,10 +50,12 @@ export const renderQueuePage = (params: { theme: BoothTheme }): string => {
   .hidden { display:none !important; }
   .fsec { margin-top:20px; padding:14px; border-radius:18px; background:rgb(255 255 255 / .06); display:flex; align-items:center; gap:12px; text-align:left; }
   .fsec .fprev { width:64px; flex-shrink:0; }
-  .fprev { position:relative; width:100%; container-type:inline-size; border-radius:10px; overflow:hidden; background:rgb(0 0 0 / .25); }
+  /* isolation keeps the preview's own z-indexes inside it, so the selected
+     frame card never paints over the frame picker sheet. */
+  .fprev { position:relative; isolation:isolate; width:100%; container-type:inline-size; border-radius:10px; overflow:hidden; background:rgb(0 0 0 / .25); }
   .fprev .fart { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
   .fprev .farea { position:absolute; display:flex; align-items:center; justify-content:center; text-align:center;
-    background:#d9d3cc; color:#3a3530; font-weight:900; letter-spacing:.06em; font-size:max(6px, 7cqw); line-height:1.1; }
+    color:#fff; font-weight:900; letter-spacing:.06em; font-size:max(6px, 7cqw); line-height:1.1; text-shadow:0 1px 3px rgb(0 0 0 / .45); }
   .fprev.plain { aspect-ratio:2/3; }
   .fsec .ft { flex:1; min-width:0; }
   .fsec .ft b { display:block; font-size:.95rem; }
@@ -204,6 +206,10 @@ function frameTemplate(f) {
   return t && t.width && t.height && t.photoSlots && t.photoSlots.length ? t : null;
 }
 
+// Same per-source colors as the booth and admin frame canvas
+// (SLOT_PLACEHOLDER_COLORS in the booth's FrameCanvas).
+var SOURCE_COLORS = ['#c24b9a', '#7d4fd1', '#9a7b1f', '#1e9fd8', '#c96a26', '#3fa463', '#d45454', '#5a6fb0', '#b7588f'];
+
 function framePreview(f) {
   var t = frameTemplate(f);
   if (!t) {
@@ -215,6 +221,7 @@ function framePreview(f) {
     return '<div class="farea" style="left:' + pct(a.x, t.width) + ';top:' + pct(a.y, t.height) +
       ';width:' + pct(a.width, t.width) + ';height:' + pct(a.height, t.height) +
       ';z-index:' + (a.zIndex != null ? a.zIndex : 10) +
+      ';background:' + SOURCE_COLORS[(n - 1) % SOURCE_COLORS.length] +
       (a.rotation ? ';transform:rotate(' + a.rotation + 'deg)' : '') +
       (a.borderRadius ? ';border-radius:' + pct(a.borderRadius, t.width) : '') + '">PHOTO ' + n + '</div>';
   }).join('');
