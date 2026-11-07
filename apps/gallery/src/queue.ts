@@ -49,7 +49,12 @@ export const renderQueuePage = (params: { theme: BoothTheme }): string => {
   .hint { margin-top:16px; font-size:.78rem; opacity:.55; line-height:1.5; }
   .hidden { display:none !important; }
   .fsec { margin-top:20px; padding:14px; border-radius:18px; background:rgb(255 255 255 / .06); display:flex; align-items:center; gap:12px; text-align:left; }
-  .fsec img { width:56px; height:84px; object-fit:contain; border-radius:8px; background:rgb(0 0 0 / .25); flex-shrink:0; }
+  .fsec .fprev { width:64px; flex-shrink:0; }
+  .fprev { position:relative; width:100%; container-type:inline-size; border-radius:10px; overflow:hidden; background:rgb(0 0 0 / .25); }
+  .fprev .fart { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+  .fprev .farea { position:absolute; display:flex; align-items:center; justify-content:center; text-align:center;
+    background:#d9d3cc; color:#3a3530; font-weight:900; letter-spacing:.06em; font-size:max(6px, 7cqw); line-height:1.1; }
+  .fprev.plain { aspect-ratio:2/3; }
   .fsec .ft { flex:1; min-width:0; }
   .fsec .ft b { display:block; font-size:.95rem; }
   .fsec .ft span { font-size:.75rem; opacity:.6; }
@@ -77,7 +82,7 @@ export const renderQueuePage = (params: { theme: BoothTheme }): string => {
   .fgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:12px; }
   .fopt { border:2px solid transparent; border-radius:16px; padding:8px; background:rgb(255 255 255 / .06); color:#fff; cursor:pointer; font:inherit; }
   .fopt.sel { border-color:var(--pbx-ui-hi); }
-  .fopt img { width:100%; aspect-ratio:2/3; object-fit:contain; border-radius:10px; background:rgb(0 0 0 / .25); }
+  .fopt .fprev { margin:0 auto; }
   .fopt span { display:block; margin-top:6px; font-size:.78rem; font-weight:700; }
   @keyframes pulse { 0%,100% { transform:scale(1) } 50% { transform:scale(1.06) } }
   .pulse { animation:pulse 1.2s ease-in-out infinite; }
@@ -187,13 +192,46 @@ function frameById(id) {
   return null;
 }
 
+// Frame preview with the photo areas labelled PHOTO 1, PHOTO 2, ... (from the
+// same template the booth uses for this frame's photo count), so guests see
+// which shot lands where. Falls back to the plain preview image.
+function frameTemplate(f) {
+  var byCount = f.templates_by_photo_slots || {};
+  var t = byCount[String(f.photo_slots)] || f.template;
+  if (!t) {
+    for (var k in byCount) { t = byCount[k]; break; }
+  }
+  return t && t.width && t.height && t.photoSlots && t.photoSlots.length ? t : null;
+}
+
+function framePreview(f) {
+  var t = frameTemplate(f);
+  if (!t) {
+    return '<div class="fprev plain"><img class="fart" src="' + esc(f.preview_url) + '" alt="" loading="lazy"/></div>';
+  }
+  var pct = function (v, total) { return (v / total * 100).toFixed(3) + '%'; };
+  var areas = t.photoSlots.map(function (a) {
+    var n = a.sourcePhotoSlot || a.slotNumber;
+    return '<div class="farea" style="left:' + pct(a.x, t.width) + ';top:' + pct(a.y, t.height) +
+      ';width:' + pct(a.width, t.width) + ';height:' + pct(a.height, t.height) +
+      ';z-index:' + (a.zIndex != null ? a.zIndex : 10) +
+      (a.rotation ? ';transform:rotate(' + a.rotation + 'deg)' : '') +
+      (a.borderRadius ? ';border-radius:' + pct(a.borderRadius, t.width) : '') + '">PHOTO ' + n + '</div>';
+  }).join('');
+  var art = t.assetUrl || f.preview_url;
+  return '<div class="fprev" style="aspect-ratio:' + t.width + '/' + t.height +
+    (t.backgroundColor ? ';background:' + esc(t.backgroundColor) : '') + '">' + areas +
+    '<img class="fart" src="' + esc(art) + '" alt="" loading="lazy" style="z-index:' +
+    (t.frameLayerZIndex != null ? t.frameLayerZIndex : 20) + '"/></div>';
+}
+
 function frameSection(s) {
   if (!frames || frames.length === 0) return '';
   var canPick = s.status === 'waiting' || s.status === 'skipped';
   var f = frameById(s.frame_id);
   if (!f && !canPick) return '';
   return '<div class="fsec">' +
-    (f ? '<img src="' + esc(f.preview_url) + '" alt=""/>' : '') +
+    (f ? framePreview(f) : '') +
     '<div class="ft"><b>' + (f ? esc(f.name) : 'Belum pilih frame') + '</b><span>' +
     (f ? 'Frame pilihanmu' : 'Pilih sambil menunggu, biar di booth langsung foto') + '</span></div>' +
     (canPick ? '<button class="btn" id="pickFrame" type="button">' + (f ? 'Ganti' : 'Pilih frame') + '</button>' : '') +
@@ -209,7 +247,7 @@ function openSheet() {
   var grid = document.getElementById('fgrid');
   grid.innerHTML = frames.map(function (f) {
     return '<button class="fopt' + (current && current.frame_id === f.id ? ' sel' : '') + '" type="button" data-id="' + esc(f.id) + '">' +
-      '<img src="' + esc(f.preview_url) + '" alt="" loading="lazy"/><span>' + esc(f.name) + '</span></button>';
+      framePreview(f) + '<span>' + esc(f.name) + '</span></button>';
   }).join('');
   grid.querySelectorAll('.fopt').forEach(function (btn) {
     btn.onclick = function () { chooseFrame(btn.getAttribute('data-id')); };

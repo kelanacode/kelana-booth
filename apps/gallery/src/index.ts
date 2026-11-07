@@ -397,7 +397,7 @@ async function handleQueueApi(request: Request, env: Env, pathname: string): Pro
     return res.ok ? json(res.data, noStore) : json({ ok: false, reason: 'offline' }, { status: 502 });
   }
   if (request.method === 'GET' && pathname === '/api/queue/frames') {
-    const url = `${env.SUPABASE_URL.replace(/\/+$/, '')}/rest/v1/frame_templates?enabled=eq.true&select=id,name,preview_url,photo_slots&order=sort_order.asc,name.asc`;
+    const url = `${env.SUPABASE_URL.replace(/\/+$/, '')}/rest/v1/frame_templates?enabled=eq.true&select=id,name,preview_url,photo_slots,template,templates_by_photo_slots&order=sort_order.asc,name.asc`;
     try {
       const response = await fetch(url, {
         headers: { apikey: env.SUPABASE_PUBLISHABLE_KEY, Authorization: `Bearer ${env.SUPABASE_PUBLISHABLE_KEY}` },
