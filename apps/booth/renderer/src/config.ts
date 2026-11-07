@@ -23,3 +23,10 @@ const appUrlRaw = (import.meta.env.VITE_APP_URL as string | undefined) ?? '';
 export const APP_URL = (appUrlRaw.trim().length > 0 ? appUrlRaw.trim().replace(/\/+$/, '') : GALLERY_URL) as
   | string
   | null;
+/**
+ * WhatsApp number guests message "ANTRI" to for the queue (digits only, with
+ * country code). Must be the number registered on the WhatsApp Cloud API.
+ * Override with VITE_QUEUE_WA_NUMBER.
+ */
+const queueWaRaw = (import.meta.env.VITE_QUEUE_WA_NUMBER as string | undefined) ?? '';
+export const QUEUE_WA_NUMBER = (queueWaRaw.replace(/\D/g, '') || '6285287560280') as string;

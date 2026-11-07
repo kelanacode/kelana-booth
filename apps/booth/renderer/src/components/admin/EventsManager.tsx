@@ -8,7 +8,7 @@ import {
   setQueueEnabled,
   updateEvent,
 } from '../../lib/events';
-import { GALLERY_URL } from '../../config';
+import { GALLERY_URL, QUEUE_WA_NUMBER } from '../../config';
 import { generateQrDataUrl } from '../../utils/qr';
 import { Modal, ConfirmModal } from './Modal';
 import { IconPencil, IconPlus, IconTrash } from './AdminIcons';
@@ -57,6 +57,13 @@ export const EventsManager: React.FC<EventsManagerProps> = ({ open, events, coun
     if (!queueUrl || !queueLive) return;
     void generateQrDataUrl(queueUrl, 512).then(setQueueQr).catch(() => setQueueQr(null));
   }, [queueUrl, queueLive]);
+  // WhatsApp queue: the QR opens WhatsApp with "ANTRI" typed in.
+  const waUrl = `https://wa.me/${QUEUE_WA_NUMBER}?text=ANTRI`;
+  const [waQr, setWaQr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!queueLive) return;
+    void generateQrDataUrl(waUrl, 512).then(setWaQr).catch(() => setWaQr(null));
+  }, [waUrl, queueLive]);
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -246,6 +253,29 @@ export const EventsManager: React.FC<EventsManagerProps> = ({ open, events, coun
                 </button>
               </div>
             ),
+          )}
+
+          {queueLive && (
+            <div className="mt-4 flex items-center gap-4 rounded-xl border border-[#25D366]/50 bg-[#25D366]/10 p-4">
+              {waQr && <img src={waQr} alt="WhatsApp queue QR" className="h-28 w-28 shrink-0 rounded-lg bg-white p-1" />}
+              <div className="min-w-0 text-sm">
+                <p className="font-semibold text-white">WhatsApp queue QR (recommended)</p>
+                <p className="mt-1 text-white/60">
+                  Opens WhatsApp with "ANTRI" typed in. Guests press Send and get their number, then a message when
+                  their turn is near, even with the phone locked.
+                </p>
+                <p className="mt-2 break-all font-mono text-xs text-[#5ee38f]">{waUrl}</p>
+                {waQr && (
+                  <a
+                    href={waQr}
+                    download="queue-whatsapp-qr.png"
+                    className="mt-2 inline-block rounded-full bg-[#25D366] px-3 py-1 text-xs font-semibold text-[#073B1C]"
+                  >
+                    Download QR
+                  </a>
+                )}
+              </div>
+            </div>
           )}
 
           {queueLive && queueUrl && (

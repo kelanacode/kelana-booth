@@ -2,8 +2,9 @@ import { DEFAULT_BOOTH_APPEARANCE, type BoothTheme } from '@photo-booth/types';
 import { renderGallery } from './gallery';
 import { qrSvgDataUrl } from './qr';
 import { renderQueuePage } from './queue';
+import { handleWaTick, handleWaWebhook, processQueueTick, type WaEnv } from './whatsapp';
 
-export interface Env {
+export interface Env extends WaEnv {
   GALLERY_BUCKET: R2Bucket;
   SUPABASE_URL: string;
   SUPABASE_PUBLISHABLE_KEY: string;
@@ -431,7 +432,7 @@ async function handleQueueApi(request: Request, env: Env, pathname: string): Pro
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const origin = url.origin;
     const { pathname } = url;
@@ -447,19 +448,21 @@ export default {
         headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
       });
     }
-    // Service worker for the /q page: Android Chrome only shows notifications
-    // through one. Tapping a notification brings the queue page back.
+    // Guest queue over WhatsApp: Meta webhook + database tick.
+    if (pathname === '/api/wa/webhook') {
+      return handleWaWebhook(request, env, ctx);
+    }
+    if (request.method === 'POST' && pathname === '/api/wa/tick') {
+      return handleWaTick(request, env, ctx);
+    }
+
+    // Retired service worker (the queue page no longer uses notifications).
+    // Phones that installed it fetch this on their next update check; it
+    // unregisters itself so nothing old stays behind.
     if (request.method === 'GET' && pathname === '/q-sw.js') {
       const sw = [
         "self.addEventListener('install', () => self.skipWaiting());",
-        "self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));",
-        "self.addEventListener('notificationclick', (e) => {",
-        '  e.notification.close();',
-        "  e.waitUntil(self.clients.matchAll({ type: 'window' }).then((list) => {",
-        "    for (const c of list) if (c.url.includes('/q')) return c.focus();",
-        "    return self.clients.openWindow('/q');",
-        '  }));',
-        '});',
+        "self.addEventListener('activate', (e) => e.waitUntil(self.registration.unregister()));",
       ].join('\n');
       return new Response(sw, {
         headers: { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' },
@@ -583,5 +586,11 @@ export default {
     }
 
     return json({ error: 'Not found' }, { status: 404 });
+  },
+
+  // Safety net for the WhatsApp queue: send any turn message the database
+  // ping missed. No-op until the WhatsApp secrets are set.
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(processQueueTick(env).catch((error) => console.error('Queue cron failed', error)));
   },
 } satisfies ExportedHandler<Env>;
