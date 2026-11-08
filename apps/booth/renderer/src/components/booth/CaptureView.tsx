@@ -291,7 +291,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
                   key={slot.slotNumber}
                   ref={slot.isCurrent ? activeSlotRef : null}
                   aria-current={slot.isCurrent ? 'step' : undefined}
-                  className={`flex shrink-0 flex-col items-center gap-1 border-b-[3px] px-1 py-1 text-[10px] font-bold sm:px-1.5 sm:py-1.5 sm:text-xs [@media(orientation:landscape)_and_(max-height:500px)]:px-1 [@media(orientation:landscape)_and_(max-height:500px)]:py-0.5 ${
+                  className={`flex shrink-0 flex-col items-center gap-1 border-b-[3px] px-1.5 py-1.5 text-[11px] font-bold sm:px-2 sm:py-2 sm:text-xs [@media(orientation:landscape)_and_(max-height:500px)]:px-1 [@media(orientation:landscape)_and_(max-height:500px)]:py-0.5 ${
                     slot.isCurrent
                       ? 'border-white bg-white/20 text-white'
                       : slot.isComplete
@@ -303,7 +303,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
                     <img
                       src={slot.photoUrl}
                       alt={`Photo slot ${slot.slotNumber}`}
-                      className="h-14 w-auto max-w-24 object-contain sm:h-20 sm:max-w-32 lg:h-24 lg:max-w-40 [@media(orientation:landscape)_and_(max-height:500px)]:h-11 [@media(orientation:landscape)_and_(max-height:500px)]:max-w-20"
+                      className="h-20 w-auto max-w-32 object-contain sm:h-28 sm:max-w-44 lg:h-32 lg:max-w-52 [@media(orientation:landscape)_and_(max-height:500px)]:h-14 [@media(orientation:landscape)_and_(max-height:500px)]:max-w-24"
                       onLoad={(event) => {
                         const { naturalWidth, naturalHeight } = event.currentTarget;
                         if (naturalWidth > 0 && naturalHeight > 0) {
@@ -313,7 +313,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
                     />
                   ) : (
                     <span
-                      className="relative flex h-14 shrink-0 items-center justify-center border border-white/35 sm:h-20 lg:h-24 [@media(orientation:landscape)_and_(max-height:500px)]:h-11"
+                      className="relative flex h-20 shrink-0 items-center justify-center border border-white/35 sm:h-28 lg:h-32 [@media(orientation:landscape)_and_(max-height:500px)]:h-14"
                       style={{ aspectRatio: photoAspectRatio }}
                     >
                       <span className="px-1 text-center leading-tight text-white/60">
