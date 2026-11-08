@@ -28,6 +28,9 @@ import { ColorField, FileField, NumberField, TextField } from './admin/fields';
 import { PhotoAreasPanel } from './admin/PhotoAreasPanel';
 import { QrSlotsPanel } from './admin/QrSlotsPanel';
 import { WatermarkPanel } from './admin/WatermarkPanel';
+import { WatermarkPiecesOverlay } from './admin/WatermarkPiecesOverlay';
+import { createWatermarkPiece } from '../utils/watermarkPieces';
+import type { WatermarkPiece, WatermarkPieceKind } from '@photo-booth/types';
 import { FrameCanvasEditor } from './admin/FrameCanvasEditor';
 import { CanvasPoint, DragState, DrawingRectangle, ResizeHandle } from './admin/types';
 
@@ -162,6 +165,8 @@ export const FrameAdminScreen: React.FC = () => {
   const [selectedAreaNumbers, setSelectedAreaNumbers] = useState<number[]>([1]);
   const [activeQrSlotNumber, setActiveQrSlotNumber] = useState(0);
   const [selectedQrSlotNumbers, setSelectedQrSlotNumbers] = useState<number[]>([]);
+  // Selected watermark piece (exclusive with the photo-area / QR selection).
+  const [activePieceId, setActivePieceId] = useState<string | null>(null);
   const [drawMode, setDrawMode] = useState(false);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [status, setStatus] = useState('');
@@ -760,7 +765,14 @@ const nudgeRef = useRef(false);
         return;
       }
 
-      if (handleDeleteArea()) {
+      if (activePieceId) {
+        event.preventDefault();
+        setDraftTemplate((template) => ({
+          ...template,
+          watermarkPieces: (template.watermarkPieces ?? []).filter((piece) => piece.id !== activePieceId),
+        }));
+        setActivePieceId(null);
+      } else if (handleDeleteArea()) {
         event.preventDefault();
       } else if (activeAreaNumber === 0 && handleDeleteQrSlot()) {
         event.preventDefault();
@@ -775,7 +787,7 @@ const nudgeRef = useRef(false);
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [undo, redo, handleDeleteArea, handleDeleteQrSlot, activeArea, activeAreaNumber, activeQrSlotNumber, selectedAreaNumbers, selectedQrSlotNumbers, draftTemplate, pushHistorySnapshot, replaceDraftTemplate, applyToSelectedAreas, applyToSelectedQrSlots, setStatus]);
+  }, [activePieceId, undo, redo, handleDeleteArea, handleDeleteQrSlot, activeArea, activeAreaNumber, activeQrSlotNumber, selectedAreaNumbers, selectedQrSlotNumbers, draftTemplate, pushHistorySnapshot, replaceDraftTemplate, applyToSelectedAreas, applyToSelectedQrSlots, setStatus]);
 
   const handleDrawStart = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) {
@@ -1453,6 +1465,56 @@ const nudgeRef = useRef(false);
     }
   };
 
+  // ---- Watermark pieces -------------------------------------------------
+  const watermarkPieces = draftTemplate.watermarkPieces ?? [];
+
+  const selectPiece = (id: string | null) => {
+    setActivePieceId(id);
+    if (id) {
+      setActiveAreaNumber(0);
+      setSelectedAreaNumbers([]);
+      setActiveQrSlotNumber(0);
+      setSelectedQrSlotNumbers([]);
+    }
+  };
+  // Picking a photo area or QR placeholder deselects the watermark piece.
+  useEffect(() => {
+    if (activeAreaNumber > 0 || activeQrSlotNumber > 0) setActivePieceId(null);
+  }, [activeAreaNumber, activeQrSlotNumber]);
+
+  const patchPiece = (id: string, patch: Partial<WatermarkPiece>) => (template: FrameTemplateConfig): FrameTemplateConfig => ({
+    ...template,
+    watermarkPieces: (template.watermarkPieces ?? []).map((piece) => (piece.id === id ? { ...piece, ...patch } : piece)),
+  });
+
+  const handleAddPiece = (kind: WatermarkPieceKind) => {
+    const piece = createWatermarkPiece(kind, draftTemplate, watermarkPieces.length);
+    setDraftTemplate((template) => ({ ...template, watermarkPieces: [...(template.watermarkPieces ?? []), piece] }));
+    selectPiece(piece.id);
+    setStatus('');
+  };
+
+  const handleUpdatePiece = (id: string, patch: Partial<WatermarkPiece>) => {
+    setDraftTemplate(patchPiece(id, patch));
+  };
+
+  const handleDuplicatePiece = (id: string) => {
+    const source = watermarkPieces.find((piece) => piece.id === id);
+    if (!source) return;
+    const copy = { ...createWatermarkPiece(source.kind, draftTemplate), ...source, x: source.x + 24, y: source.y + 24 };
+    copy.id = createWatermarkPiece(source.kind, draftTemplate).id;
+    setDraftTemplate((template) => ({ ...template, watermarkPieces: [...(template.watermarkPieces ?? []), copy] }));
+    selectPiece(copy.id);
+  };
+
+  const handleDeletePiece = (id: string) => {
+    setDraftTemplate((template) => ({
+      ...template,
+      watermarkPieces: (template.watermarkPieces ?? []).filter((piece) => piece.id !== id),
+    }));
+    setActivePieceId(null);
+  };
+
   const handleLoadFrameFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -1743,6 +1805,17 @@ const nudgeRef = useRef(false);
           onQrResizePointerMove={handleQrResizePointerMove}
           onQrResizePointerUp={handleQrResizePointerUp}
           onQrResizePointerLeave={handleQrResizePointerLeave}
+          overlay={
+            <WatermarkPiecesOverlay
+              pieces={watermarkPieces}
+              templateWidth={draftTemplate.width}
+              templateHeight={draftTemplate.height}
+              activeId={activePieceId}
+              onSelect={selectPiece}
+              onBegin={pushHistorySnapshot}
+              onChange={(id, patch) => replaceDraftTemplate(patchPiece(id, patch))}
+            />
+          }
           sidebar={
             <div className="grid gap-4">
               <div className="grid grid-cols-1 gap-3 rounded-[12px] border-[3px] border-pbx-line bg-pbx-tint p-4 sm:grid-cols-2">
@@ -1850,8 +1923,15 @@ const nudgeRef = useRef(false);
               />
 
               <WatermarkPanel
-                watermark={draftTemplate.watermark}
-                onChange={(watermark) => updateTemplate({ watermark })}
+                pieces={watermarkPieces}
+                activeId={activePieceId}
+                onSelect={selectPiece}
+                onAdd={handleAddPiece}
+                onUpdate={handleUpdatePiece}
+                onDuplicate={handleDuplicatePiece}
+                onDelete={handleDeletePiece}
+                hasLegacy={Boolean(draftTemplate.watermark?.enabled)}
+                onRemoveLegacy={() => updateTemplate({ watermark: undefined })}
               />
             </div>
           }
