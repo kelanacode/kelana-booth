@@ -325,6 +325,14 @@ export class PrinterService {
         args.push('-o', `${key}=${value}`);
       }
     } else {
+      // Fill the whole sheet. Without a scaling option CUPS fits the image
+      // inside the printer's imageable area (page minus its margins), which
+      // leaves white strips on the Selphy. The frames already match the
+      // paper's aspect ratio (100x148), so filling crops next to nothing.
+      // print-scaling is the IPP name (cups-filters 1.17+); `fill` is the
+      // older cups-filters spelling. Unknown options are ignored by CUPS.
+      args.push('-o', 'print-scaling=fill');
+      args.push('-o', 'fill');
       args.push('-o', 'position=center');
       if (payload.paperSize) {
         args.push('-o', `media=${payload.paperSize}`);
