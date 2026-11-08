@@ -504,7 +504,7 @@ export const DEFAULT_BOOTH_APPEARANCE: BoothAppearance = {
 
     frameEyebrow: 'Bingkai',
     frameTitle: 'Pilih gaya foto',
-    frameConfirmButton: 'Pilih bingkai',
+    frameConfirmButton: 'Pilih',
 
     readyTitle: 'Preview & Capture',
     readySubtitle: 'Get ready to take {count} beautiful photos!',
