@@ -1,6 +1,7 @@
 import type { CSSProperties, PointerEvent, WheelEvent } from 'react';
 import { FrameConfig, FrameTemplateConfig } from '@photo-booth/types';
 import { resolveFrameTemplate } from '../utils/frameConfig';
+import { qrCornerRadiusCss } from '../utils/qrCorners';
 
 interface FrameCanvasProps {
   frame?: FrameConfig | null;
@@ -181,7 +182,7 @@ export const FrameCanvas = ({
           top: toPercent(qrSlot.y, resolvedTemplate.height),
           width: toPercent(qrSlot.width, resolvedTemplate.width),
           height: toPercent(qrSlot.height, resolvedTemplate.height),
-          borderRadius: qrSlot.borderRadius,
+          borderRadius: qrCornerRadiusCss(qrSlot),
           transform: qrSlot.rotation ? `rotate(${qrSlot.rotation}deg)` : undefined,
           zIndex: qrSlot.zIndex ?? 30,
           containerType: 'inline-size' as CSSProperties['containerType'],
