@@ -68,16 +68,47 @@ export const renderQueuePage = (params: { theme: BoothTheme }): string => {
   .pager button { margin-top:10px; padding:16px 30px; border:0; border-radius:999px; font:inherit; font-size:1.1rem; font-weight:800;
     background:#111; color:#fff; cursor:pointer; }
   @keyframes flash { 0% { background:var(--pbx-ui-hi); color:var(--pbx-ui-hi-fg); } 50% { background:#111; color:var(--pbx-ui-hi); } }
-  .sheet { position:fixed; inset:0; z-index:10; background:rgb(0 0 0 / .7); display:flex; align-items:flex-end; justify-content:center; }
-  .sheet-box { width:min(100vw,560px); max-height:88vh; overflow:auto; padding:20px 16px 28px; border-radius:24px 24px 0 0;
-    background:var(--pbx-ui-panel); }
-  .sheet-box h2 { margin:0 0 4px; font-size:1.1rem; }
-  .sheet-box p { margin:0 0 14px; font-size:.8rem; opacity:.6; }
-  .fgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:12px; }
-  .fopt { border:2px solid transparent; border-radius:16px; padding:8px; background:rgb(255 255 255 / .06); color:#fff; cursor:pointer; font:inherit; }
+  /* Frame picker: fullscreen page with a bento grid (landscape frames span
+     two columns), then a fullscreen preview with previous / next, like the
+     booth's frame picker. */
+  .sheet { position:fixed; inset:0; z-index:10; background:var(--pbx-ui-panel); display:flex; flex-direction:column; }
+  .sheet-head { display:flex; align-items:center; gap:12px; padding:16px 16px 10px; }
+  .sheet-head h2 { margin:0; font-size:1.15rem; flex:1; }
+  .sheet-head p { margin:2px 0 0; font-size:.78rem; opacity:.6; }
+  .sheet-body { flex:1; overflow:auto; padding:4px 12px 24px; }
+  .xbtn { width:42px; height:42px; flex-shrink:0; border:0; border-radius:999px; background:var(--pbx-ui-brand); color:var(--pbx-ui-brand-fg);
+    font-size:1.05rem; font-weight:900; cursor:pointer; box-shadow:0 4px 12px rgb(0 0 0 / .45); }
+  .fgrid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); grid-auto-flow:dense; gap:10px; }
+  @media (min-width:640px) { .fgrid { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+  .fopt { border:2px solid transparent; border-radius:16px; padding:8px; background:rgb(255 255 255 / .06); color:#fff; cursor:pointer; font:inherit;
+    display:flex; flex-direction:column; justify-content:space-between; }
+  .fopt.wide { grid-column:span 2; }
   .fopt.sel { border-color:var(--pbx-ui-hi); }
   .fopt .fprev { margin:0 auto; }
   .fopt span { display:block; margin-top:6px; font-size:.78rem; font-weight:700; }
+  .fview { position:fixed; inset:0; z-index:20; display:grid; grid-template-rows:minmax(0,1fr) auto; background:rgb(var(--pbx-ui-bg-rgb) / .97);
+    touch-action:pan-y; animation:qfade .2s ease-out both; }
+  .fview-stage { position:relative; display:flex; align-items:center; justify-content:center; min-height:0; padding:64px 8px 6px; container-type:size; }
+  .fview-frame { width:min(100cqh * var(--r), 100cqw); animation:qzoom .3s cubic-bezier(.2,.9,.3,1.1) both; }
+  .fview-frame.next { animation:qnext .28s cubic-bezier(.2,.9,.3,1) both; }
+  .fview-frame.prev { animation:qprev .28s cubic-bezier(.2,.9,.3,1) both; }
+  .fview-frame .fprev { border-radius:14px; box-shadow:0 12px 40px rgb(0 0 0 / .55); }
+  /* No native image drag: it would cancel the swipe. */
+  .fview img { -webkit-user-drag:none; user-select:none; pointer-events:none; }
+  .fview { user-select:none; -webkit-user-select:none; }
+  .fview .xbtn { position:absolute; top:14px; right:14px; z-index:2; }
+  .farrow { position:absolute; top:50%; transform:translateY(-50%); z-index:2; width:44px; height:44px; border:0; border-radius:999px; background:#fff; color:#111;
+    font-size:1.6rem; font-weight:900; line-height:1; cursor:pointer; box-shadow:0 4px 12px rgb(0 0 0 / .45); }
+  .farrow.l { left:6px; } .farrow.r { right:6px; }
+  .fview-bar { display:flex; align-items:center; gap:14px; padding:10px 16px 22px; }
+  .fview-bar .info { flex:1; min-width:0; }
+  .fview-bar .info b { display:block; font-size:.95rem; text-transform:uppercase; letter-spacing:.06em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .fview-bar .info span { font-size:.75rem; opacity:.6; letter-spacing:.1em; }
+  .fview-bar .btn { margin:0; padding:13px 30px; text-transform:uppercase; letter-spacing:.1em; }
+  @keyframes qfade { from { opacity:0 } to { opacity:1 } }
+  @keyframes qzoom { from { opacity:0; transform:scale(.85) } to { opacity:1; transform:scale(1) } }
+  @keyframes qnext { from { opacity:0; transform:translateX(14%) } to { opacity:1; transform:none } }
+  @keyframes qprev { from { opacity:0; transform:translateX(-14%) } to { opacity:1; transform:none } }
   @keyframes pulse { 0%,100% { transform:scale(1) } 50% { transform:scale(1.06) } }
   .pulse { animation:pulse 1.2s ease-in-out infinite; }
 </style>
@@ -94,11 +125,22 @@ export const renderQueuePage = (params: { theme: BoothTheme }): string => {
   <button type="button" id="pagerOk">Oke, saya ke booth</button>
 </div>
 <div class="sheet hidden" id="sheet">
-  <div class="sheet-box">
-    <h2>Pilih frame</h2>
-    <p>Frame ini langsung dipakai saat giliranmu di booth.</p>
-    <div class="fgrid" id="fgrid"></div>
-    <button class="btn ghost" id="sheetClose" type="button">Tutup</button>
+  <div class="sheet-head">
+    <div style="flex:1;min-width:0"><h2>Pilih frame</h2><p>Frame ini langsung dipakai saat giliranmu di booth.</p></div>
+    <button class="xbtn" id="sheetClose" type="button" aria-label="Tutup">&#10005;</button>
+  </div>
+  <div class="sheet-body"><div class="fgrid" id="fgrid"></div></div>
+</div>
+<div class="fview hidden" id="fview" role="dialog" aria-modal="true">
+  <div class="fview-stage" id="fviewStage">
+    <button class="xbtn" id="fviewClose" type="button" aria-label="Tutup">&#10005;</button>
+    <button class="farrow l" id="fviewPrev" type="button" aria-label="Frame sebelumnya">&#8249;</button>
+    <div class="fview-frame" id="fviewFrame"></div>
+    <button class="farrow r" id="fviewNext" type="button" aria-label="Frame berikutnya">&#8250;</button>
+  </div>
+  <div class="fview-bar">
+    <div class="info"><b id="fviewName"></b><span id="fviewPos"></span></div>
+    <button class="btn" id="fviewPick" type="button">Pilih</button>
   </div>
 </div>
 <script>
@@ -233,19 +275,71 @@ function wireFrameButton() {
   if (b) b.onclick = openSheet;
 }
 
+function frameRatio(f) {
+  var t = frameTemplate(f);
+  return t ? t.width / t.height : 2 / 3;
+}
+
 function openSheet() {
   var grid = document.getElementById('fgrid');
-  grid.innerHTML = frames.map(function (f) {
-    return '<button class="fopt' + (current && current.frame_id === f.id ? ' sel' : '') + '" type="button" data-id="' + esc(f.id) + '">' +
+  grid.innerHTML = frames.map(function (f, i) {
+    var wide = frameRatio(f) > 1;
+    return '<button class="fopt' + (wide ? ' wide' : '') + (current && current.frame_id === f.id ? ' sel' : '') + '" type="button" data-i="' + i + '">' +
       framePreview(f) + '<span>' + esc(f.name) + '</span></button>';
   }).join('');
   grid.querySelectorAll('.fopt').forEach(function (btn) {
-    btn.onclick = function () { chooseFrame(btn.getAttribute('data-id')); };
+    btn.onclick = function () { openView(Number(btn.getAttribute('data-i')), null); };
   });
   document.getElementById('sheet').classList.remove('hidden');
 }
 
-function closeSheet() { document.getElementById('sheet').classList.add('hidden'); }
+function closeSheet() { closeView(); document.getElementById('sheet').classList.add('hidden'); }
+
+// Fullscreen preview with previous / next (arrows, swipe, keys), like the booth.
+var viewIndex = -1;
+function openView(i, dir) {
+  if (!frames || !frames.length) return;
+  viewIndex = (i + frames.length) % frames.length;
+  var f = frames[viewIndex];
+  var box = document.getElementById('fviewFrame');
+  box.className = 'fview-frame' + (dir ? ' ' + dir : '');
+  box.style.setProperty('--r', String(frameRatio(f)));
+  box.innerHTML = framePreview(f);
+  void box.offsetWidth; // restart the slide animation
+  document.getElementById('fviewName').textContent = f.name;
+  document.getElementById('fviewPos').textContent = frames.length > 1 ? (viewIndex + 1) + ' / ' + frames.length : '';
+  var multi = frames.length > 1;
+  document.getElementById('fviewPrev').style.display = multi ? '' : 'none';
+  document.getElementById('fviewNext').style.display = multi ? '' : 'none';
+  document.getElementById('fview').classList.remove('hidden');
+}
+function closeView() { viewIndex = -1; document.getElementById('fview').classList.add('hidden'); }
+function stepView(d) { if (viewIndex >= 0 && frames.length > 1) openView(viewIndex + d, d > 0 ? 'next' : 'prev'); }
+(function () {
+  var sx = null, sy = null;
+  var stage = document.getElementById('fview');
+  stage.addEventListener('pointerdown', function (e) { sx = e.clientX; sy = e.clientY; });
+  stage.addEventListener('pointerup', function (e) {
+    if (sx === null) return;
+    var dx = e.clientX - sx, dy = e.clientY - sy;
+    sx = sy = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.2) stepView(dx < 0 ? 1 : -1);
+  });
+  document.addEventListener('keydown', function (e) {
+    if (viewIndex < 0) return;
+    if (e.key === 'ArrowRight') stepView(1);
+    else if (e.key === 'ArrowLeft') stepView(-1);
+    else if (e.key === 'Escape') closeView();
+  });
+  var stop = function (e) { e.stopPropagation(); };
+  ['fviewPrev', 'fviewNext', 'fviewClose', 'fviewPick'].forEach(function (id) {
+    document.getElementById(id).addEventListener('pointerdown', stop);
+  });
+  document.getElementById('fviewPrev').onclick = function () { stepView(-1); };
+  document.getElementById('fviewNext').onclick = function () { stepView(1); };
+  document.getElementById('fviewClose').onclick = closeView;
+  document.getElementById('fviewPick').onclick = function () { if (viewIndex >= 0) chooseFrame(frames[viewIndex].id); };
+})();
 
 function chooseFrame(id) {
   var ticket = load(TICKET_KEY);
