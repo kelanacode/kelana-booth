@@ -27,6 +27,7 @@ import {
 import { ColorField, FileField, NumberField, TextField } from './admin/fields';
 import { PhotoAreasPanel } from './admin/PhotoAreasPanel';
 import { QrSlotsPanel } from './admin/QrSlotsPanel';
+import { WatermarkPanel } from './admin/WatermarkPanel';
 import { FrameCanvasEditor } from './admin/FrameCanvasEditor';
 import { CanvasPoint, DragState, DrawingRectangle, ResizeHandle } from './admin/types';
 
@@ -1846,6 +1847,11 @@ const nudgeRef = useRef(false);
                 onDuplicateQrSlot={handleDuplicateQrSlot}
                 onDeleteQrSlot={handleDeleteQrSlot}
                 onUpdateActiveQrSlot={updateActiveQrSlot}
+              />
+
+              <WatermarkPanel
+                watermark={draftTemplate.watermark}
+                onChange={(watermark) => updateTemplate({ watermark })}
               />
             </div>
           }

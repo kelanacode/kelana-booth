@@ -2,6 +2,7 @@ import type { CSSProperties, PointerEvent, WheelEvent } from 'react';
 import { FrameConfig, FrameTemplateConfig } from '@photo-booth/types';
 import { resolveFrameTemplate } from '../utils/frameConfig';
 import { qrCornerRadiusCss } from '../utils/qrCorners';
+import { buildWatermarks } from '../utils/watermark';
 
 interface FrameCanvasProps {
   frame?: FrameConfig | null;
@@ -175,6 +176,24 @@ export const FrameCanvas = ({
           </div>
         );
       })}
+
+      {/* Kelana watermark (same SVG as the printed result), always on top. */}
+      {buildWatermarks(resolvedTemplate.watermark, resolvedTemplate.width, resolvedTemplate.height).map((wm, index) => (
+        <img
+          key={`wm-${index}`}
+          src={wm.url}
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none absolute select-none"
+          style={{
+            left: `${(wm.x / resolvedTemplate.width) * 100}%`,
+            top: `${(wm.y / resolvedTemplate.height) * 100}%`,
+            width: `${(wm.width / resolvedTemplate.width) * 100}%`,
+            height: `${(wm.height / resolvedTemplate.height) * 100}%`,
+            zIndex: 9999,
+          }}
+        />
+      ))}
 
       {resolvedTemplate.qrSlots?.map((qrSlot) => {
         const qrStyle: CSSProperties = {
