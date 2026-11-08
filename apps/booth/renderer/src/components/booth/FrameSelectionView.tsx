@@ -289,7 +289,9 @@ export const FrameSelectionView: React.FC<FrameSelectionViewProps> = ({
 
           {/* Two columns on narrow screens so each frame stays legible; three
               from `sm` up (booth displays and the admin preview). */}
-          <div className="grid grid-cols-2 place-items-center gap-2 sm:grid-cols-3 sm:gap-3">
+          {/* Bento grid: landscape frames span two columns, portrait frames
+              one; dense flow fills the gaps so the rows stay closed. */}
+          <div className="grid grid-flow-dense grid-cols-2 place-items-stretch gap-2 sm:grid-cols-3 sm:gap-3">
             {isLoading
               ? Array.from({ length: 9 }, (_, index) => (
                   <div
@@ -307,12 +309,15 @@ export const FrameSelectionView: React.FC<FrameSelectionViewProps> = ({
                     />
                   </div>
                 ))
-              : frames.map((frame, index) => (
+              : frames.map((frame, index) => {
+                  const tpl = resolveFrameTemplate(frame, frame.photoSlots ?? 3);
+                  const landscape = tpl.width > tpl.height;
+                  return (
                   // Outer wrapper owns the entrance animation; the card itself
                   // owns the hover lift (both animate transform).
                   <div
                     key={frame.id}
-                    className="h-full w-full"
+                    className={`h-full w-full ${landscape ? 'col-span-2' : ''}`}
                     style={
                       {
                         '--pr': `${index % 2 === 0 ? -1 : 1}deg`,
@@ -349,7 +354,8 @@ export const FrameSelectionView: React.FC<FrameSelectionViewProps> = ({
                       </h3>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
           </div>
         </div>
       </div>
