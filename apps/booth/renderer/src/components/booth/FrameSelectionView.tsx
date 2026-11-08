@@ -87,139 +87,200 @@ export const FrameSelectionView: React.FC<FrameSelectionViewProps> = ({
 
   // Rendered into <body> on the booth (fullscreen), so no transformed parent
   // can shrink a position:fixed overlay; inside the view in the admin preview.
-  const previewModal = selected ? (
-        <div
-          className={`${fullscreenModal ? 'fixed' : 'absolute'} inset-0 z-[300] grid grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden`}
+  // Screen orientation decides the layout of the preview. A portrait frame on a
+  // landscape screen gets the full height: the controls move into the empty
+  // space at its sides instead of taking rows above and below it.
+  const [viewport, setViewport] = useState(() =>
+    typeof window === 'undefined' ? { w: 1280, h: 800 } : { w: window.innerWidth, h: window.innerHeight },
+  );
+  useEffect(() => {
+    const update = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+  const landscapeScreen = viewport.w >= viewport.h;
+  // Empty space on each side of a full-height frame (minus margins). The side
+  // layout is used only when the controls fit there without touching it.
+  const sideSpace = (viewport.w - (viewport.h - 32) * selectedPreviewRatio) / 2 - 40;
+  const sideLayout = landscapeScreen && selectedPreviewRatio < 1 && sideSpace >= 200;
+  const sideWidth = Math.min(384, Math.max(0, sideSpace));
+
+  const dots =
+    canStep && frames.length <= 12 ? (
+      <div className="flex items-center gap-1.5">
+        {frames.map((frame, index) => (
+          <button
+            key={frame.id}
+            type="button"
+            aria-label={frame.name}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => {
+              if (index === selectedIndex) return;
+              setDirection(index > selectedIndex ? 'next' : 'prev');
+              onSelect(frame);
+            }}
+            className="h-2.5 rounded-full transition-all"
+            style={{
+              width: index === selectedIndex ? 22 : 10,
+              backgroundColor: index === selectedIndex ? theme.action : withAlpha(theme.card, 0.4),
+            }}
+          />
+        ))}
+      </div>
+    ) : null;
+
+  const titleBlock = selected ? (
+    <div className="min-w-0">
+      <p className="truncate text-[0.95rem] font-black uppercase tracking-[0.08em] sm:text-[1.15rem]" style={{ color: theme.card }}>
+        {selected.name}
+      </p>
+      {canStep && (
+        <p className="text-[0.72rem] font-bold uppercase tracking-[0.18em] opacity-70" style={{ color: theme.card }}>
+          {selectedIndex + 1} / {frames.length}
+        </p>
+      )}
+    </div>
+  ) : null;
+
+  const closeButton = (
+    <button
+      onClick={onClose}
+      onPointerDown={(e) => e.stopPropagation()}
+      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] border-[3px] text-[1.3rem] font-black text-white shadow-[0_4px_0_rgba(0,0,0,0.45)] transition-transform hover:-translate-y-0.5 active:translate-y-0 sm:h-12 sm:w-12"
+      style={{ borderColor: theme.secondary, backgroundColor: theme.primary }}
+      aria-label="Close"
+    >
+      &#10005;
+    </button>
+  );
+
+  const confirmButton = (
+    <button
+      onClick={onConfirm}
+      onPointerDown={(e) => e.stopPropagation()}
+      className="w-full max-w-md rounded-[14px] border-[3px] px-7 py-4 text-[0.9rem] font-black uppercase tracking-[0.14em] shadow-[0_5px_0_rgba(0,0,0,0.25)] transition-all hover:-translate-y-0.5 active:translate-y-0 sm:text-[1rem]"
+      style={
+        {
+          borderColor: theme.deep,
+          backgroundColor: theme.action,
+          color: theme.actionForeground,
+          '--glow': withAlpha(theme.action, 0.55),
+          animation: 'pb-cta-breathe 2.2s ease-in-out 0.6s infinite',
+        } as React.CSSProperties
+      }
+    >
+      {copy.frameConfirmButton} →
+    </button>
+  );
+
+  const arrowClass =
+    'absolute top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border-[3px] text-[1.6rem] font-black shadow-[0_4px_0_rgba(0,0,0,0.4)] transition-transform hover:scale-105 active:scale-95 sm:h-14 sm:w-14';
+
+  const stage = selected ? (
+    <div
+      className={`relative flex min-h-0 items-center justify-center ${sideLayout ? 'h-full px-24 py-4' : landscapeScreen ? 'px-3 py-2 sm:px-20' : 'px-2 py-1'}`}
+      style={{ containerType: 'size' }}
+    >
+      <div
+        key={selected.id}
+        className="flex items-center justify-center"
+        style={{
+          animation:
+            direction === 'next'
+              ? 'pb-slide-from-right 0.32s cubic-bezier(0.2, 0.9, 0.3, 1) both'
+              : direction === 'prev'
+                ? 'pb-slide-from-left 0.32s cubic-bezier(0.2, 0.9, 0.3, 1) both'
+                : 'pb-modal-zoom 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2) both',
+        }}
+      >
+        <FrameCanvas
+          frame={selected}
+          photoSlotCount={selected.photoSlots ?? 3}
+          className="rounded-[14px] border-[3px] bg-white shadow-[0_16px_50px_rgba(0,0,0,0.6)]"
           style={{
-            background: withAlpha(theme.deep, 0.97),
-            animation: 'pb-modal-fade 0.25s ease-out both',
-            touchAction: 'pan-y',
+            borderColor: theme.accent,
+            // As large as the stage allows, keeping the frame's proportions.
+            width: `min(100cqh * ${selectedPreviewRatio}, 100cqw)`,
+            aspectRatio: `${selectedPreviewRatio}`,
           }}
-          role="dialog"
-          aria-modal="true"
-          aria-label={selected.name}
-          onPointerDown={onSwipeStart}
-          onPointerUp={onSwipeEnd}
-          onPointerCancel={() => (swipeRef.current = null)}
-        >
-          {/* Top: frame name + position, close. */}
+        />
+      </div>
+
+      {canStep && (
+        <>
+          <button
+            type="button"
+            onClick={() => step(-1)}
+            onPointerDown={(e) => e.stopPropagation()}
+            aria-label="Frame sebelumnya"
+            className={`${arrowClass} ${sideLayout ? 'left-6' : landscapeScreen ? 'left-1 sm:left-4' : 'left-1'}`}
+            style={{ borderColor: theme.secondary, backgroundColor: theme.card, color: theme.cardForeground }}
+          >
+            &#8249;
+          </button>
+          <button
+            type="button"
+            onClick={() => step(1)}
+            onPointerDown={(e) => e.stopPropagation()}
+            aria-label="Frame berikutnya"
+            className={`${arrowClass} ${sideLayout ? 'right-6' : landscapeScreen ? 'right-1 sm:right-4' : 'right-1'}`}
+            style={{ borderColor: theme.secondary, backgroundColor: theme.card, color: theme.cardForeground }}
+          >
+            &#8250;
+          </button>
+        </>
+      )}
+    </div>
+  ) : null;
+
+  const previewModal = selected ? (
+    <div
+      className={`${fullscreenModal ? 'fixed' : 'absolute'} inset-0 z-[300] overflow-hidden ${
+        sideLayout ? '' : 'grid grid-rows-[auto_minmax(0,1fr)_auto]'
+      }`}
+      style={{
+        background: withAlpha(theme.deep, 0.97),
+        animation: 'pb-modal-fade 0.25s ease-out both',
+        touchAction: 'pan-y',
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={selected.name}
+      onPointerDown={onSwipeStart}
+      onPointerUp={onSwipeEnd}
+      onPointerCancel={() => (swipeRef.current = null)}
+    >
+      {sideLayout ? (
+        <>
+          {/* Portrait frame on a landscape screen: the frame takes the full
+              height; everything else sits in the empty space beside it. */}
+          {stage}
+          <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start gap-3 px-6 pt-5">
+            <div className="pointer-events-auto mr-auto" style={{ maxWidth: sideWidth }}>{titleBlock}</div>
+            <div className="pointer-events-auto">{closeButton}</div>
+          </div>
+          <div className="absolute bottom-6 right-6 flex flex-col items-stretch gap-3" style={{ width: sideWidth }}>
+            {dots && <div className="flex justify-center">{dots}</div>}
+            {confirmButton}
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Top: name + position (+ dots on portrait screens), close. */}
           <div className="flex items-center gap-3 px-4 pb-2 pt-4 sm:px-6 sm:pt-5">
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[0.95rem] font-black uppercase tracking-[0.08em] sm:text-[1.15rem]" style={{ color: theme.card }}>
-                {selected.name}
-              </p>
-              {canStep && (
-                <p className="text-[0.72rem] font-bold uppercase tracking-[0.18em] opacity-70" style={{ color: theme.card }}>
-                  {selectedIndex + 1} / {frames.length}
-                </p>
-              )}
-            </div>
-            <button
-              onClick={onClose}
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] border-[3px] text-[1.3rem] font-black text-white shadow-[0_4px_0_rgba(0,0,0,0.45)] transition-transform hover:-translate-y-0.5 active:translate-y-0 sm:h-12 sm:w-12"
-              style={{ borderColor: theme.secondary, backgroundColor: theme.primary }}
-              aria-label="Close"
-            >
-              &#10005;
-            </button>
+            <div className="min-w-0 flex-1">{titleBlock}</div>
+            {!landscapeScreen && dots}
+            {closeButton}
           </div>
-
-          {/* Middle: the frame as large as the screen allows, arrows at the sides. */}
-          <div className="relative flex min-h-0 items-center justify-center px-3 py-2 sm:px-20" style={{ containerType: 'size' }}>
-            <div
-              key={selected.id}
-              className="flex items-center justify-center"
-              style={{
-                animation:
-                  direction === 'next'
-                    ? 'pb-slide-from-right 0.32s cubic-bezier(0.2, 0.9, 0.3, 1) both'
-                    : direction === 'prev'
-                      ? 'pb-slide-from-left 0.32s cubic-bezier(0.2, 0.9, 0.3, 1) both'
-                      : 'pb-modal-zoom 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2) both',
-              }}
-            >
-              <FrameCanvas
-                frame={selected}
-                photoSlotCount={selected.photoSlots ?? 3}
-                className="rounded-[14px] border-[3px] bg-white shadow-[0_16px_50px_rgba(0,0,0,0.6)]"
-                style={{
-                  borderColor: theme.accent,
-                  // Fill the middle row: as tall as it is, unless that makes
-                  // the frame wider than the row (landscape frames).
-                  width: `min(100cqh * ${selectedPreviewRatio}, 100cqw)`,
-                  aspectRatio: `${selectedPreviewRatio}`,
-                }}
-              />
-            </div>
-
-            {canStep && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => step(-1)}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  aria-label="Frame sebelumnya"
-                  className="absolute left-1 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border-[3px] text-[1.6rem] font-black shadow-[0_4px_0_rgba(0,0,0,0.4)] transition-transform hover:scale-105 active:scale-95 sm:left-4 sm:h-14 sm:w-14"
-                  style={{ borderColor: theme.secondary, backgroundColor: theme.card, color: theme.cardForeground }}
-                >
-                  &#8249;
-                </button>
-                <button
-                  type="button"
-                  onClick={() => step(1)}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  aria-label="Frame berikutnya"
-                  className="absolute right-1 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border-[3px] text-[1.6rem] font-black shadow-[0_4px_0_rgba(0,0,0,0.4)] transition-transform hover:scale-105 active:scale-95 sm:right-4 sm:h-14 sm:w-14"
-                  style={{ borderColor: theme.secondary, backgroundColor: theme.card, color: theme.cardForeground }}
-                >
-                  &#8250;
-                </button>
-              </>
-            )}
+          {stage}
+          {/* Bottom: confirm (+ dots on landscape screens). */}
+          <div className={`flex flex-col items-center gap-3 px-4 pt-2 ${landscapeScreen ? 'pb-6 sm:pb-8' : 'pb-4'}`}>
+            {landscapeScreen && dots}
+            {confirmButton}
           </div>
-
-          {/* Bottom: position dots + confirm. */}
-          <div className="flex flex-col items-center gap-3 px-4 pb-6 pt-2 sm:pb-8">
-            {canStep && frames.length <= 12 && (
-              <div className="flex items-center gap-1.5">
-                {frames.map((frame, index) => (
-                  <button
-                    key={frame.id}
-                    type="button"
-                    aria-label={frame.name}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={() => {
-                      if (index === selectedIndex) return;
-                      setDirection(index > selectedIndex ? 'next' : 'prev');
-                      onSelect(frame);
-                    }}
-                    className="h-2.5 rounded-full transition-all"
-                    style={{
-                      width: index === selectedIndex ? 22 : 10,
-                      backgroundColor: index === selectedIndex ? theme.action : withAlpha(theme.card, 0.4),
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-            <button
-              onClick={onConfirm}
-              onPointerDown={(e) => e.stopPropagation()}
-              className="w-full max-w-md rounded-[14px] border-[3px] px-7 py-4 text-[0.9rem] font-black uppercase tracking-[0.14em] shadow-[0_5px_0_rgba(0,0,0,0.25)] transition-all hover:-translate-y-0.5 active:translate-y-0 sm:text-[1rem]"
-              style={
-                {
-                  borderColor: theme.deep,
-                  backgroundColor: theme.action,
-                  color: theme.actionForeground,
-                  '--glow': withAlpha(theme.action, 0.55),
-                  animation: 'pb-cta-breathe 2.2s ease-in-out 0.6s infinite',
-                } as React.CSSProperties
-              }
-            >
-              {copy.frameConfirmButton} →
-            </button>
-          </div>
-        </div>
+        </>
+      )}
+    </div>
   ) : null;
 
   return (
