@@ -65,6 +65,32 @@ export interface FrameQRPlacement {
   zIndex?: number;
 }
 
+/** Kelana watermark drawn on top of the finished frame (prints + exports). */
+export type FrameWatermarkLogo = 'none' | 'mark' | 'logo';
+export type FrameWatermarkPosition = 'bottom-center' | 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
+export type FrameWatermarkTone = 'color' | 'light' | 'dark';
+
+export interface FrameWatermark {
+  enabled: boolean;
+  /** none = text only, mark = the K mark alone, logo = K mark + "elana". */
+  logo: FrameWatermarkLogo;
+  showInstagram: boolean;
+  instagram: string;
+  showWebsite: boolean;
+  website: string;
+  showWhatsapp: boolean;
+  whatsapp: string;
+  position: FrameWatermarkPosition;
+  /** color = brand colors (light backgrounds), light = for dark frames, dark = mono dark. */
+  tone: FrameWatermarkTone;
+  /** Logo height as a share of the frame width (e.g. 0.05). */
+  size: number;
+  /** 0..1 */
+  opacity: number;
+  /** Double strips (cut in half): draw one watermark on each half. */
+  repeatPerStrip?: boolean;
+}
+
 export interface FrameTemplateConfig {
   assetUrl: string;
   width: number;
@@ -73,6 +99,7 @@ export interface FrameTemplateConfig {
   frameLayerZIndex?: number;
   photoSlots: FramePhotoPlacement[];
   qrSlots?: FrameQRPlacement[];
+  watermark?: FrameWatermark;
 }
 
 export interface FrameConfig {

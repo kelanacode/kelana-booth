@@ -1,4 +1,4 @@
-import { FrameConfig, FramePhotoPlacement, FrameQRPlacement, FrameTemplateConfig, PhotoSlotState } from '@photo-booth/types';
+import { FrameConfig, FramePhotoPlacement, FrameQRPlacement, FrameTemplateConfig, FrameWatermark, PhotoSlotState } from '@photo-booth/types';
 import { resolveFrameTemplate, resolveObjectPosition } from './frameConfig';
 import { getSelectedPhotoUrls, getSelectedLiveFrames } from './photoSlots';
 import { getCanvasFilter } from './filters';
@@ -7,6 +7,7 @@ import { downloadBlob, downloadStamp } from './download';
 import { clampGifAdjust, FULL_GIF_WINDOW, gifCanvasAspect, type GifAdjust, type GifWindow } from './gifAdjust';
 import { resolveGifSlot } from '../lib/gifFrames';
 import { qrCornerRadius } from './qrCorners';
+import { buildWatermarks } from './watermark';
 
 const imageCache = new Map<string, Promise<HTMLImageElement>>();
 
@@ -242,6 +243,7 @@ async function renderTemplated(
     assetUrl?: string;
     frameLayerZIndex?: number;
     qrSlots?: FrameQRPlacement[];
+    watermark?: FrameWatermark;
   },
   canvasFilter: string,
   width: number,
@@ -280,6 +282,21 @@ async function renderTemplated(
           ctx.drawImage(asset, 0, 0, width, height);
         } catch {
           // Frame asset is optional; still export the photo composition.
+        }
+      },
+    });
+  }
+
+  // Kelana watermark, always on top of everything.
+  for (const watermark of buildWatermarks(template.watermark, template.width, template.height)) {
+    ops.push({
+      zIndex: Number.MAX_SAFE_INTEGER,
+      draw: async () => {
+        try {
+          const mark = await loadImage(watermark.url);
+          ctx.drawImage(mark, watermark.x, watermark.y, watermark.width, watermark.height);
+        } catch {
+          // Watermark is optional; never fail the export over it.
         }
       },
     });
