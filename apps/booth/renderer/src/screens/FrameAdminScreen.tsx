@@ -18,7 +18,7 @@ import {
 } from '../lib/frames';
 import { navigateToAdmin, navigateToBooth } from '../lib/navigation';
 import { pushSnackbar } from '../lib/snackbarBus';
-import { processFrameAsset } from '../utils/greenScreenDetection';
+import { processColorKeyedFrame } from '../utils/colorKeyDetection';
 import { resolveFrameTemplate } from '../utils/frameConfig';
 import {
   clearFrameTemplateDraft,
@@ -1411,10 +1411,12 @@ const nudgeRef = useRef(false);
 
   const loadFrameFile = async (file: File) => {
     setLoading(true);
-    setStatus('Loading frame, detecting green screen...');
+    setStatus('Loading frame, detecting photo areas by color...');
     try {
       const dataUrl = await readFileAsDataUrl(file);
-      const processed = await processFrameAsset(dataUrl);
+      // Any vivid solid color marks a photo area; the same color = the same
+      // source photo (see utils/colorKeyDetection).
+      const processed = await processColorKeyedFrame(dataUrl);
 
       let assetUrl = processed.assetUrl;
       let uploaded = false;
@@ -1431,7 +1433,7 @@ const nudgeRef = useRef(false);
 
       const nextSlots: FramePhotoPlacement[] = processed.regions.map((region, index) => ({
         slotNumber: index + 1,
-        sourcePhotoSlot: clamp(index + 1, 1, Math.max(sourcePhotoCount, processed.regions.length)),
+        sourcePhotoSlot: clamp(region.source, 1, MAX_SOURCE_PHOTOS),
         x: Math.round(region.x),
         y: Math.round(region.y),
         width: Math.round(region.width),
@@ -1453,12 +1455,13 @@ const nudgeRef = useRef(false);
       setActiveAreaNumber(1);
 
       if (processed.regions.length > 0) {
-        setSourcePhotoCount((current) => clamp(Math.max(current, processed.regions.length), 1, MAX_SOURCE_PHOTOS));
+        setSourcePhotoCount(clamp(processed.sourceCount, 1, MAX_SOURCE_PHOTOS));
         setStatus(
-          `Detected ${processed.regions.length} green screen area(s), green keyed to transparent${uploaded ? '' : ' (local)'}`,
+          `Detected ${processed.regions.length} photo area(s) in ${processed.sourceCount} color(s) = ` +
+            `${processed.sourceCount} source photo(s); colors keyed to transparent${uploaded ? '' : ' (local)'}`,
         );
       } else {
-        setStatus('No green screen detected - draw areas manually');
+        setStatus('No solid color areas detected - draw areas manually');
       }
     } catch (error) {
       setStatus(`Load failed: ${String(error)}`);
