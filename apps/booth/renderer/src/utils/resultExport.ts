@@ -6,6 +6,7 @@ import { filteredSource } from './canvasFilter';
 import { downloadBlob, downloadStamp } from './download';
 import { clampGifAdjust, FULL_GIF_WINDOW, gifCanvasAspect, type GifAdjust, type GifWindow } from './gifAdjust';
 import { resolveGifSlot } from '../lib/gifFrames';
+import { qrCornerRadius } from './qrCorners';
 
 const imageCache = new Map<string, Promise<HTMLImageElement>>();
 
@@ -139,7 +140,7 @@ const drawQrSlotImage = async (
     const centerY = slot.y + slot.height / 2;
     const drawX = centerX - size / 2;
     const drawY = centerY - size / 2;
-    const radius = slot.borderRadius ?? 0;
+    const radius = qrCornerRadius(slot);
 
     ctx.save();
     ctx.translate(centerX, centerY);

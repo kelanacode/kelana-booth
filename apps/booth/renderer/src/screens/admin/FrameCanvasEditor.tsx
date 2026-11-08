@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { FrameConfig, FramePhotoPlacement, FrameQRPlacement, FrameTemplateConfig } from '@photo-booth/types';
 import FrameCanvas from '../../components/FrameCanvas';
 import { DrawingRectangle, ResizeHandle } from './types';
+import { qrCornerRadiusCss } from '../../utils/qrCorners';
 
 const toPercent = (value: number, total: number) => `${(value / total) * 100}%`;
 
@@ -647,7 +648,7 @@ export const FrameCanvasEditor = ({
                         ? 'border-[3px] border-[#22c55e] ring-2 ring-[#22c55e]/40'
                         : 'border-2 border-[#22c55e]/70 hover:border-[#22c55e]'
                     }`}
-                    style={getAreaStyle(qrSlot, template)}
+                    style={{ ...getAreaStyle(qrSlot, template), borderRadius: qrCornerRadiusCss(qrSlot) }}
                   >
                     <IconQr className="h-[40%] w-[40%] text-zinc-900" />
                     <span className="text-[9px] font-black uppercase tracking-widest text-zinc-700">
