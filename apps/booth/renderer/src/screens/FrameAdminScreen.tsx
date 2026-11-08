@@ -18,7 +18,7 @@ import {
 } from '../lib/frames';
 import { navigateToAdmin, navigateToBooth } from '../lib/navigation';
 import { pushSnackbar } from '../lib/snackbarBus';
-import { processColorKeyedFrame } from '../utils/colorKeyDetection';
+import { processColorKeyedFrame, removeColorKeys, type ColorKeyRegion } from '../utils/colorKeyDetection';
 import { resolveFrameTemplate } from '../utils/frameConfig';
 import {
   clearFrameTemplateDraft,
@@ -187,6 +187,14 @@ export const FrameAdminScreen: React.FC = () => {
     };
   }, [status, loading]);
   const canvasRef = useRef<HTMLDivElement>(null);
+  // Color-keyed frame loaded in this editor session: the original artwork and
+  // the detected color area behind each photo area (index = slotNumber - 1),
+  // so deleting a wrongly detected area can restore its pixels.
+  const colorKeyRef = useRef<{ original: string; regions: Array<ColorKeyRegion | null> } | null>(null);
+  // Another frame in the editor: its artwork is not this original.
+  useEffect(() => {
+    colorKeyRef.current = null;
+  }, [selectedFrameId]);
   const draggingRef = useRef(false);
 const nudgeRef = useRef(false);
 
@@ -491,6 +499,28 @@ const nudgeRef = useRef(false);
     setStatus('');
   };
 
+  // Rebuild the color-keyed frame image from the original file, keying only
+  // the given areas (used after deleting a wrongly detected one).
+  const refineKeyedArtwork = async (original: string, regions: ColorKeyRegion[]) => {
+    setStatus('Restoring the deleted area in the frame artwork...');
+    try {
+      const keyedUrl = regions.length > 0 ? await removeColorKeys(original, regions) : original;
+      let assetUrl = keyedUrl;
+      let uploaded = false;
+      try {
+        const pngFile = new File([dataUrlToBlob(keyedUrl)], `${frameId}-processed.png`, { type: 'image/png' });
+        assetUrl = await uploadFrameAsset(frameId, pngFile);
+        uploaded = true;
+      } catch {
+        // Keep the local data URL when the upload fails.
+      }
+      setDraftTemplate((template) => ({ ...template, assetUrl }));
+      setStatus(`Frame refined: deleted area restored${uploaded ? '' : ' (local)'}`);
+    } catch (error) {
+      setStatus(`Refine failed: ${String(error)}`);
+    }
+  };
+
   const handleDeleteArea = () => {
     const targets = selectedAreaNumbers.length > 0 ? selectedAreaNumbers : [activeAreaNumber];
     if (targets.length === 0 || activeAreaNumber === 0) {
@@ -498,9 +528,19 @@ const nudgeRef = useRef(false);
     }
 
     const wasSequential = isSequential(draftTemplate.photoSlots);
-    const remainingAreas = draftTemplate.photoSlots.length - targets.length;
-    if (wasSequential && remainingAreas > 0 && remainingAreas < sourcePhotoCount) {
-      setSourcePhotoCount(remainingAreas);
+    const remainingList = draftTemplate.photoSlots.filter((area) => !targets.includes(area.slotNumber));
+
+    // Refine the sources: renumber the source photos still in use to 1..n in
+    // order of first use, so deleting a wrongly detected area never leaves a
+    // gap (Photo 1, 3, 4) or an unused extra photo.
+    const compactSources = new Map<number, number>();
+    for (const area of remainingList) {
+      const source = area.sourcePhotoSlot ?? area.slotNumber;
+      if (!compactSources.has(source)) compactSources.set(source, compactSources.size + 1);
+    }
+    const nextSourceCount = wasSequential ? remainingList.length : compactSources.size;
+    if (remainingList.length > 0) {
+      setSourcePhotoCount(clamp(nextSourceCount, 1, MAX_SOURCE_PHOTOS));
     }
 
     setDraftTemplate((template) => {
@@ -514,14 +554,33 @@ const nudgeRef = useRef(false);
       }
 
       const nextAreas = normalizeAreas(
-        wasSequential ? remaining.map((area, index) => ({ ...area, sourcePhotoSlot: index + 1 })) : remaining,
-        wasSequential ? remaining.length : sourcePhotoCount,
+        wasSequential
+          ? remaining.map((area, index) => ({ ...area, sourcePhotoSlot: index + 1 }))
+          : remaining.map((area) => ({
+              ...area,
+              sourcePhotoSlot: compactSources.get(area.sourcePhotoSlot ?? area.slotNumber) ?? 1,
+            })),
+        Math.max(1, nextSourceCount),
       );
       return {
         ...template,
         photoSlots: nextAreas,
       };
     });
+
+    // Refine the artwork: if a deleted area had been color-keyed to a hole,
+    // rebuild the frame from the original file keying only the areas left.
+    const keyed = colorKeyRef.current;
+    if (keyed) {
+      const removedKeyed = targets.some((slot) => keyed.regions[slot - 1]);
+      const keptRegions = draftTemplate.photoSlots.map((area) =>
+        targets.includes(area.slotNumber) ? undefined : keyed.regions[area.slotNumber - 1] ?? null,
+      ).filter((region): region is ColorKeyRegion | null => region !== undefined);
+      keyed.regions = keptRegions;
+      if (removedKeyed) {
+        void refineKeyedArtwork(keyed.original, keptRegions.filter((region): region is ColorKeyRegion => Boolean(region)));
+      }
+    }
 
     const remainingCount = Math.max(draftTemplate.photoSlots.length - targets.length, 0);
     if (remainingCount === 0) {
@@ -1451,6 +1510,7 @@ const nudgeRef = useRef(false);
         height: processed.height,
         photoSlots: nextSlots.length > 0 ? nextSlots : template.photoSlots,
       }));
+      colorKeyRef.current = nextSlots.length > 0 ? { original: dataUrl, regions: [...processed.regions] } : null;
 
       setActiveAreaNumber(1);
 
