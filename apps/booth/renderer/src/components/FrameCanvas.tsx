@@ -3,6 +3,7 @@ import { FrameConfig, FrameTemplateConfig } from '@photo-booth/types';
 import { resolveFrameTemplate } from '../utils/frameConfig';
 import { qrCornerRadiusCss } from '../utils/qrCorners';
 import { buildWatermarks } from '../utils/watermark';
+import { pieceImage } from '../utils/watermarkPieces';
 
 interface FrameCanvasProps {
   frame?: FrameConfig | null;
@@ -176,6 +177,25 @@ export const FrameCanvas = ({
           </div>
         );
       })}
+
+      {/* Watermark pieces (same SVGs as the printed result), on top. */}
+      {(resolvedTemplate.watermarkPieces ?? []).map((piece, index) => (
+        <img
+          key={piece.id}
+          src={pieceImage(piece).url}
+          alt=""
+          aria-hidden="true"
+          className="pointer-events-none absolute select-none object-contain"
+          style={{
+            left: `${(piece.x / resolvedTemplate.width) * 100}%`,
+            top: `${(piece.y / resolvedTemplate.height) * 100}%`,
+            width: `${(piece.width / resolvedTemplate.width) * 100}%`,
+            height: `${(piece.height / resolvedTemplate.height) * 100}%`,
+            transform: piece.rotation ? `rotate(${piece.rotation}deg)` : undefined,
+            zIndex: 9000 + index,
+          }}
+        />
+      ))}
 
       {/* Kelana watermark (same SVG as the printed result), always on top. */}
       {buildWatermarks(resolvedTemplate.watermark, resolvedTemplate.width, resolvedTemplate.height).map((wm, index) => (

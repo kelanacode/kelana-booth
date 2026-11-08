@@ -1,4 +1,4 @@
-import { FrameConfig, FramePhotoPlacement, FrameQRPlacement, FrameTemplateConfig, FrameWatermark, PhotoSlotState } from '@photo-booth/types';
+import { FrameConfig, FramePhotoPlacement, FrameQRPlacement, FrameTemplateConfig, FrameWatermark, PhotoSlotState, WatermarkPiece } from '@photo-booth/types';
 import { resolveFrameTemplate, resolveObjectPosition } from './frameConfig';
 import { getSelectedPhotoUrls, getSelectedLiveFrames } from './photoSlots';
 import { getCanvasFilter } from './filters';
@@ -8,6 +8,7 @@ import { clampGifAdjust, FULL_GIF_WINDOW, gifCanvasAspect, type GifAdjust, type 
 import { resolveGifSlot } from '../lib/gifFrames';
 import { qrCornerRadius } from './qrCorners';
 import { buildWatermarks } from './watermark';
+import { fitInBox, pieceImage } from './watermarkPieces';
 
 const imageCache = new Map<string, Promise<HTMLImageElement>>();
 
@@ -244,6 +245,7 @@ async function renderTemplated(
     frameLayerZIndex?: number;
     qrSlots?: FrameQRPlacement[];
     watermark?: FrameWatermark;
+    watermarkPieces?: WatermarkPiece[];
   },
   canvasFilter: string,
   width: number,
@@ -301,6 +303,30 @@ async function renderTemplated(
       },
     });
   }
+
+  // Watermark pieces, on top of everything, in list order.
+  (template.watermarkPieces ?? []).forEach((piece, index) => {
+    ops.push({
+      zIndex: Number.MAX_SAFE_INTEGER - 1000 + index,
+      draw: async () => {
+        try {
+          const art = pieceImage(piece);
+          const image = await loadImage(art.url);
+          const box = fitInBox(piece, art.aspect);
+          const cx = piece.x + piece.width / 2;
+          const cy = piece.y + piece.height / 2;
+          ctx.save();
+          ctx.translate(cx, cy);
+          if (piece.rotation) ctx.rotate((piece.rotation * Math.PI) / 180);
+          ctx.translate(-cx, -cy);
+          ctx.drawImage(image, box.x, box.y, box.width, box.height);
+          ctx.restore();
+        } catch {
+          // A watermark piece never fails the export.
+        }
+      },
+    });
+  });
 
   ops.sort((a, b) => a.zIndex - b.zIndex);
   for (const op of ops) {

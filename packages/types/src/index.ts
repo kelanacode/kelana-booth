@@ -91,6 +91,38 @@ export interface FrameWatermark {
   repeatPerStrip?: boolean;
 }
 
+/**
+ * Watermark pieces: independent elements placed on the frame like photo
+ * areas (move / resize / rotate), drawn on top of everything.
+ *   mark = the K logo mark, logo = K mark + "elana",
+ *   instagram / website / whatsapp / text = one line of text (contact kinds
+ *   can carry their icon).
+ */
+export type WatermarkPieceKind = 'mark' | 'logo' | 'instagram' | 'website' | 'whatsapp' | 'text';
+/** brand = original colors, brand-light = for dark frames, solid = one color. */
+export type WatermarkLogoStyle = 'brand' | 'brand-light' | 'solid';
+
+export interface WatermarkPiece {
+  id: string;
+  kind: WatermarkPieceKind;
+  /** Text for the text kinds (handle, website, number, free text). */
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation?: number;
+  /** Text / icon color, and the logo color when logoStyle is solid. */
+  color: string;
+  logoStyle?: WatermarkLogoStyle;
+  /** Contact kinds: show the Instagram / globe / WhatsApp icon before the text. */
+  showIcon?: boolean;
+  /** Bold text. */
+  bold?: boolean;
+  /** 0..1 */
+  opacity: number;
+}
+
 export interface FrameTemplateConfig {
   assetUrl: string;
   width: number;
@@ -99,7 +131,9 @@ export interface FrameTemplateConfig {
   frameLayerZIndex?: number;
   photoSlots: FramePhotoPlacement[];
   qrSlots?: FrameQRPlacement[];
+  /** @deprecated single preset watermark; replaced by watermarkPieces (still drawn if set). */
   watermark?: FrameWatermark;
+  watermarkPieces?: WatermarkPiece[];
 }
 
 export interface FrameConfig {

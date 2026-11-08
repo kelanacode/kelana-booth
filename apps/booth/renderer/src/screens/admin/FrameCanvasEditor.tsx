@@ -76,6 +76,8 @@ interface FrameCanvasEditorProps {
   onQrResizePointerMove: (event: PointerEvent<HTMLDivElement>, qrSlot: FrameQRPlacement) => void;
   onQrResizePointerUp: (event: PointerEvent<HTMLDivElement>, qrSlot: FrameQRPlacement) => void;
   onQrResizePointerLeave: (event: PointerEvent<HTMLDivElement>, qrSlot: FrameQRPlacement) => void;
+  /** Extra interactive layer over the canvas (watermark pieces). */
+  overlay?: ReactNode;
   /** Panel content (frame settings, photo areas, ...) rendered in the sidebar. */
   sidebar?: ReactNode;
 }
@@ -268,6 +270,7 @@ export const FrameCanvasEditor = ({
   onQrResizePointerMove,
   onQrResizePointerUp,
   onQrResizePointerLeave,
+  overlay,
   sidebar,
 }: FrameCanvasEditorProps) => {
   const [sourceMenuFor, setSourceMenuFor] = useState<number | null>(null);
@@ -576,6 +579,8 @@ export const FrameCanvasEditor = ({
                 className="absolute inset-0 h-full w-full !border-0 !text-pbx-ink"
               />
             </div>
+
+            {overlay}
 
             <div
               className={`absolute inset-0 z-50 ${drawMode ? 'cursor-crosshair' : ''}`}
