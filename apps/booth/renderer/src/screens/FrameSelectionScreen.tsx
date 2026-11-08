@@ -53,6 +53,7 @@ export const FrameSelectionScreen: React.FC = () => {
         onSelect={setSelected}
         onClose={() => setSelected(null)}
         onConfirm={handleConfirm}
+        fullscreenModal
       />
     </div>
   );

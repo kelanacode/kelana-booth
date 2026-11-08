@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { BoothCopywriting, BoothTheme, FrameConfig } from '@photo-booth/types';
 import FrameCanvas from '../FrameCanvas';
 import { resolveFrameTemplate } from '../../utils/frameConfig';
@@ -14,6 +15,11 @@ export interface FrameSelectionViewProps {
   onSelect: (frame: FrameConfig) => void;
   onClose: () => void;
   onConfirm: () => void;
+  /**
+   * Booth: the preview modal covers the whole window (position: fixed). The
+   * admin appearance preview leaves it off so the modal stays in its stage.
+   */
+  fullscreenModal?: boolean;
 }
 
 /**
@@ -31,6 +37,7 @@ export const FrameSelectionView: React.FC<FrameSelectionViewProps> = ({
   onSelect,
   onClose,
   onConfirm,
+  fullscreenModal = false,
 }) => {
   const selectedPreviewRatio = selected
     ? (() => {
@@ -38,6 +45,182 @@ export const FrameSelectionView: React.FC<FrameSelectionViewProps> = ({
         return template.width / template.height;
       })()
     : 0.75;
+
+  // Carousel: previous / next frame from the modal (arrows, swipe, keys).
+  const selectedIndex = selected ? frames.findIndex((frame) => frame.id === selected.id) : -1;
+  const [direction, setDirection] = useState<'next' | 'prev' | null>(null);
+  const canStep = frames.length > 1 && selectedIndex >= 0;
+  const step = (delta: 1 | -1) => {
+    if (!canStep) return;
+    setDirection(delta > 0 ? 'next' : 'prev');
+    onSelect(frames[(selectedIndex + delta + frames.length) % frames.length]);
+  };
+  const stepRef = useRef(step);
+  stepRef.current = step;
+
+  useEffect(() => {
+    if (!selected) {
+      setDirection(null);
+      return;
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowRight') stepRef.current(1);
+      else if (event.key === 'ArrowLeft') stepRef.current(-1);
+      else if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selected, onClose]);
+
+  const swipeRef = useRef<{ x: number; y: number } | null>(null);
+  const onSwipeStart = (event: React.PointerEvent) => {
+    swipeRef.current = { x: event.clientX, y: event.clientY };
+  };
+  const onSwipeEnd = (event: React.PointerEvent) => {
+    const start = swipeRef.current;
+    swipeRef.current = null;
+    if (!start) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.2) step(dx < 0 ? 1 : -1);
+  };
+
+  // Rendered into <body> on the booth (fullscreen), so no transformed parent
+  // can shrink a position:fixed overlay; inside the view in the admin preview.
+  const previewModal = selected ? (
+        <div
+          className={`${fullscreenModal ? 'fixed' : 'absolute'} inset-0 z-[300] grid grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden`}
+          style={{
+            background: withAlpha(theme.deep, 0.97),
+            animation: 'pb-modal-fade 0.25s ease-out both',
+            touchAction: 'pan-y',
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-label={selected.name}
+          onPointerDown={onSwipeStart}
+          onPointerUp={onSwipeEnd}
+          onPointerCancel={() => (swipeRef.current = null)}
+        >
+          {/* Top: frame name + position, close. */}
+          <div className="flex items-center gap-3 px-4 pb-2 pt-4 sm:px-6 sm:pt-5">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[0.95rem] font-black uppercase tracking-[0.08em] sm:text-[1.15rem]" style={{ color: theme.card }}>
+                {selected.name}
+              </p>
+              {canStep && (
+                <p className="text-[0.72rem] font-bold uppercase tracking-[0.18em] opacity-70" style={{ color: theme.card }}>
+                  {selectedIndex + 1} / {frames.length}
+                </p>
+              )}
+            </div>
+            <button
+              onClick={onClose}
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] border-[3px] text-[1.3rem] font-black text-white shadow-[0_4px_0_rgba(0,0,0,0.45)] transition-transform hover:-translate-y-0.5 active:translate-y-0 sm:h-12 sm:w-12"
+              style={{ borderColor: theme.secondary, backgroundColor: theme.primary }}
+              aria-label="Close"
+            >
+              &#10005;
+            </button>
+          </div>
+
+          {/* Middle: the frame as large as the screen allows, arrows at the sides. */}
+          <div className="relative flex min-h-0 items-center justify-center px-3 py-2 sm:px-20" style={{ containerType: 'size' }}>
+            <div
+              key={selected.id}
+              className="flex items-center justify-center"
+              style={{
+                animation:
+                  direction === 'next'
+                    ? 'pb-slide-from-right 0.32s cubic-bezier(0.2, 0.9, 0.3, 1) both'
+                    : direction === 'prev'
+                      ? 'pb-slide-from-left 0.32s cubic-bezier(0.2, 0.9, 0.3, 1) both'
+                      : 'pb-modal-zoom 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2) both',
+              }}
+            >
+              <FrameCanvas
+                frame={selected}
+                photoSlotCount={selected.photoSlots ?? 3}
+                className="rounded-[14px] border-[3px] bg-white shadow-[0_16px_50px_rgba(0,0,0,0.6)]"
+                style={{
+                  borderColor: theme.accent,
+                  // Fill the middle row: as tall as it is, unless that makes
+                  // the frame wider than the row (landscape frames).
+                  width: `min(100cqh * ${selectedPreviewRatio}, 100cqw)`,
+                  aspectRatio: `${selectedPreviewRatio}`,
+                }}
+              />
+            </div>
+
+            {canStep && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => step(-1)}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  aria-label="Frame sebelumnya"
+                  className="absolute left-1 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border-[3px] text-[1.6rem] font-black shadow-[0_4px_0_rgba(0,0,0,0.4)] transition-transform hover:scale-105 active:scale-95 sm:left-4 sm:h-14 sm:w-14"
+                  style={{ borderColor: theme.secondary, backgroundColor: theme.card, color: theme.cardForeground }}
+                >
+                  &#8249;
+                </button>
+                <button
+                  type="button"
+                  onClick={() => step(1)}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  aria-label="Frame berikutnya"
+                  className="absolute right-1 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full border-[3px] text-[1.6rem] font-black shadow-[0_4px_0_rgba(0,0,0,0.4)] transition-transform hover:scale-105 active:scale-95 sm:right-4 sm:h-14 sm:w-14"
+                  style={{ borderColor: theme.secondary, backgroundColor: theme.card, color: theme.cardForeground }}
+                >
+                  &#8250;
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Bottom: position dots + confirm. */}
+          <div className="flex flex-col items-center gap-3 px-4 pb-6 pt-2 sm:pb-8">
+            {canStep && frames.length <= 12 && (
+              <div className="flex items-center gap-1.5">
+                {frames.map((frame, index) => (
+                  <button
+                    key={frame.id}
+                    type="button"
+                    aria-label={frame.name}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => {
+                      if (index === selectedIndex) return;
+                      setDirection(index > selectedIndex ? 'next' : 'prev');
+                      onSelect(frame);
+                    }}
+                    className="h-2.5 rounded-full transition-all"
+                    style={{
+                      width: index === selectedIndex ? 22 : 10,
+                      backgroundColor: index === selectedIndex ? theme.action : withAlpha(theme.card, 0.4),
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+            <button
+              onClick={onConfirm}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="w-full max-w-md rounded-[14px] border-[3px] px-7 py-4 text-[0.9rem] font-black uppercase tracking-[0.14em] shadow-[0_5px_0_rgba(0,0,0,0.25)] transition-all hover:-translate-y-0.5 active:translate-y-0 sm:text-[1rem]"
+              style={
+                {
+                  borderColor: theme.deep,
+                  backgroundColor: theme.action,
+                  color: theme.actionForeground,
+                  '--glow': withAlpha(theme.action, 0.55),
+                  animation: 'pb-cta-breathe 2.2s ease-in-out 0.6s infinite',
+                } as React.CSSProperties
+              }
+            >
+              {copy.frameConfirmButton} →
+            </button>
+          </div>
+        </div>
+  ) : null;
 
   return (
     <div
@@ -145,70 +328,10 @@ export const FrameSelectionView: React.FC<FrameSelectionViewProps> = ({
         </div>
       </div>
 
-      {selected && (
-        <div
-          className="absolute inset-0 z-[200] flex items-center justify-center overflow-hidden"
-          style={{
-            background: theme.deep,
-            opacity: 0.96,
-            animation: 'pb-modal-fade 0.25s ease-out both',
-          }}
-          onClick={onClose}
-        >
-          <div
-            className="relative flex max-h-[82%] max-w-[92%] items-center justify-center"
-            style={{ animation: 'pb-modal-zoom 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2) both' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <FrameCanvas
-              frame={selected}
-              photoSlotCount={selected.photoSlots ?? 3}
-              className="rounded-[14px] border-[3px] bg-white shadow-[0_12px_40px_rgba(0,0,0,0.55)]"
-              style={{
-                borderColor: theme.accent,
-                // Percentage width here would resolve against this flex
-                // container's shrink-to-fit width, which is indefinite -> 0px.
-                // cqh/cqw are definite and track the view, not the window.
-                width: `min(80cqh * ${selectedPreviewRatio}, 92cqw)`,
-                aspectRatio: `${selectedPreviewRatio}`,
-              }}
-            />
-          </div>
-
-          <button
-            onClick={onClose}
-            className="absolute right-6 top-6 flex h-9 w-9 items-center justify-center rounded-[10px] border-[3px] text-[1.2rem] font-black text-white shadow-[0_4px_0_rgba(0,0,0,0.45)] transition-transform hover:-translate-y-0.5 active:translate-y-0 sm:h-10 sm:w-10"
-            style={{ borderColor: theme.secondary, backgroundColor: theme.primary }}
-            aria-label="Close"
-          >
-            &#10005;
-          </button>
-
-          <div className="absolute inset-x-0 bottom-0 flex flex-wrap items-center gap-3 px-4 pb-8 pt-16 sm:gap-4 sm:px-6">
-            <span
-              className="mr-auto max-w-[52%] truncate text-[0.82rem] font-black uppercase tracking-[0.08em] text-white sm:text-[0.9rem]"
-              style={{ color: theme.card }}
-            >
-              {selected.name}
-            </span>
-            <button
-              onClick={onConfirm}
-              className="rounded-[12px] border-[3px] px-7 py-3 text-[0.78rem] font-black uppercase tracking-[0.14em] shadow-[0_4px_0_rgba(0,0,0,0.25)] transition-all hover:-translate-y-0.5 active:translate-y-0 sm:text-[0.85rem]"
-              style={
-                {
-                  borderColor: theme.deep,
-                  backgroundColor: theme.action,
-                  color: theme.actionForeground,
-                  '--glow': withAlpha(theme.action, 0.55),
-                  animation: 'pb-cta-breathe 2.2s ease-in-out 0.6s infinite',
-                } as React.CSSProperties
-              }
-            >
-              {copy.frameConfirmButton} →
-            </button>
-          </div>
-        </div>
-      )}
+      {selected &&
+        (fullscreenModal && typeof document !== 'undefined'
+          ? createPortal(previewModal, document.body)
+          : previewModal)}
     </div>
   );
 };

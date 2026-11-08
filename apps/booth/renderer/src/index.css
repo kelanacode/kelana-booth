@@ -266,6 +266,29 @@
   }
 }
 
+/* Frame preview carousel: slide in from the side the guest swiped from. */
+@keyframes pb-slide-from-right {
+  from {
+    opacity: 0;
+    transform: translateX(14%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes pb-slide-from-left {
+  from {
+    opacity: 0;
+    transform: translateX(-14%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
 @keyframes pb-modal-fade {
   from {
     opacity: 0;
