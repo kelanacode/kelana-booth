@@ -1,4 +1,4 @@
-import { themeTokenCssVars, type BoothTheme } from '@photo-booth/types';
+import { KELANA_LOGO_PATHS, themeTokenCssVars, type BoothTheme } from '@photo-booth/types';
 
 /**
  * Guest queue page served at GET /q. One fixed QR near the booth points here;
@@ -54,6 +54,9 @@ export const renderQueuePage = (params: { theme: BoothTheme }): string => {
      frame card never paints over the frame picker sheet. */
   .fprev { position:relative; isolation:isolate; width:100%; container-type:inline-size; border-radius:10px; overflow:hidden; background:rgb(0 0 0 / .25); }
   .fprev .fart { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+  .fprev .fqr { position:absolute; background:#fff; overflow:hidden; box-shadow:0 0 0 1px rgb(0 0 0 / .15); display:flex; align-items:center; justify-content:center; }
+  .fprev .fqr svg { width:68%; height:68%; }
+  .fprev .fwm { position:absolute; object-fit:contain; pointer-events:none; }
   .fprev .farea { position:absolute; display:flex; align-items:center; justify-content:center; text-align:center;
     color:#fff; font-weight:900; letter-spacing:.06em; font-size:max(6px, 7cqw); line-height:1.1; text-shadow:0 1px 3px rgb(0 0 0 / .45); }
   .fprev.plain { aspect-ratio:2/3; }
@@ -144,6 +147,7 @@ export const renderQueuePage = (params: { theme: BoothTheme }): string => {
   </div>
 </div>
 <script>
+var LOGO_PATHS = ${JSON.stringify(KELANA_LOGO_PATHS)};
 var DEVICE_KEY = 'kq_device';
 var TICKET_KEY = 'kq_ticket';
 var POLL_MS = 5000;
@@ -251,10 +255,78 @@ function framePreview(f) {
       (a.borderRadius ? ';border-radius:' + pct(a.borderRadius, t.width) : '') + '">PHOTO ' + n + '</div>';
   }).join('');
   var art = t.assetUrl || f.preview_url;
+  // QR placeholders, like the booth: white, slightly rounded, QR glyph.
+  var qrs = (t.qrSlots || []).map(function (q) {
+    var rad = q.borderRadius > 0 ? q.borderRadius : Math.round(Math.min(q.width, q.height) * 0.06);
+    return '<div class="fqr" style="left:' + pct(q.x, t.width) + ';top:' + pct(q.y, t.height) +
+      ';width:' + pct(q.width, t.width) + ';height:' + pct(q.height, t.height) +
+      ';z-index:' + (q.zIndex != null ? q.zIndex : 30) +
+      ';border-radius:' + pct(rad, q.width) + ' / ' + pct(rad, q.height) +
+      (q.rotation ? ';transform:rotate(' + q.rotation + 'deg)' : '') + '">' + QR_GLYPH + '</div>';
+  }).join('');
+  // Watermark pieces (logo, contacts, text) on top, same artwork as the print.
+  var marks = (t.watermarkPieces || []).map(function (wp, i) {
+    return '<img class="fwm" alt="" src="' + pieceImageUrl(wp) + '" style="left:' + pct(wp.x, t.width) + ';top:' + pct(wp.y, t.height) +
+      ';width:' + pct(wp.width, t.width) + ';height:' + pct(wp.height, t.height) + ';z-index:' + (9000 + i) +
+      (wp.rotation ? ';transform:rotate(' + wp.rotation + 'deg)' : '') + '"/>';
+  }).join('');
   return '<div class="fprev" style="aspect-ratio:' + t.width + '/' + t.height +
-    (t.backgroundColor ? ';background:' + esc(t.backgroundColor) : '') + '">' + areas +
+    (t.backgroundColor ? ';background:' + esc(t.backgroundColor) : '') + '">' + areas + qrs +
     '<img class="fart" src="' + esc(art) + '" alt="" loading="lazy" style="z-index:' +
-    (t.frameLayerZIndex != null ? t.frameLayerZIndex : 20) + '"/></div>';
+    (t.frameLayerZIndex != null ? t.frameLayerZIndex : 20) + '"/>' + marks + '</div>';
+}
+
+var QR_GLYPH = '<svg viewBox="0 0 24 24" fill="#18181b" aria-hidden="true"><path d="M3 3h7v7H3zM4 4v5h5V4h-5z"/><path d="M14 3h7v7h-7zM15 4v5h5V4h-5z"/>' +
+  '<path d="M3 14h7v7H3zM4 15v5h5v-5h-5z"/><path d="M14 14h1.8v1.8H14zM17 14h1.8v1.8H17zM14 17h1.8v1.8H14zM17.6 17h1.8v1.8h-1.8zM14 20h5v2h-5zM20 19.5h2v2.5h-2z"/>' +
+  '<path d="M7 7.5h2.5V10H7zM15 7.5h2.5V10H15zM8.5 15h2.5v2.5H8.5z" opacity=".85"/></svg>';
+
+// Watermark piece artwork: a port of the booth's utils/watermarkPieces
+// (keep the two in step), one SVG per piece, fitted into its box.
+var WM_FONT = 'Helvetica Neue, Helvetica, Arial, sans-serif';
+var WM_ICONS = {
+  instagram: '<rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4.2"/><circle cx="17.4" cy="6.6" r="0.9" fill="currentColor" stroke="none"/>',
+  website: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.9 5.6 3.9 9s-1.3 6.4-3.9 9M12 3c-2.6 2.6-3.9 5.6-3.9 9s1.3 6.4 3.9 9"/>',
+  whatsapp: '<path d="M4.2 19.8l1.1-3.9A8.5 8.5 0 1 1 8.4 19z"/><path d="M9.2 8.6c.3-.6.6-.6.9-.6h.6c.2 0 .4.1.5.4l.8 1.9c.1.2 0 .5-.1.7l-.5.6c-.1.2-.1.4 0 .5.6 1 1.4 1.8 2.4 2.4.2.1.4.1.5 0l.6-.5c.2-.2.5-.2.7-.1l1.9.8c.3.1.4.3.4.5v.6c0 .3 0 .6-.6.9-.6.3-1.8.6-3.6-.4-1.4-.8-2.6-2-3.4-3.4-1-1.8-.7-3-.4-3.6z" fill="currentColor" stroke="none"/>'
+};
+var WM_PALETTES = {
+  brand: { blue: '#537796', olive: '#515543', gold: '#CFAD63', highlight: '#FFFFFF', word: '#5E4D42' },
+  'brand-light': { blue: '#7FA2C2', olive: '#C3C8AE', gold: '#D9B96F', highlight: '#FFFFFF', word: '#F3EADF' }
+};
+var wmCtx = null;
+function wmMeasure(text, bold) {
+  if (!wmCtx) wmCtx = document.createElement('canvas').getContext('2d');
+  if (!wmCtx) return text.length * 55;
+  wmCtx.font = (bold ? 700 : 500) + ' 100px ' + WM_FONT;
+  return wmCtx.measureText(text).width;
+}
+function pieceImageUrl(wp) {
+  var op = Math.min(1, Math.max(0, wp.opacity == null ? 1 : wp.opacity));
+  var svg;
+  if (wp.kind === 'mark' || wp.kind === 'logo') {
+    var v = wp.kind === 'mark' ? [37, 27, 954, 711] : [37, 27, 2532, 711];
+    var style = wp.logoStyle || 'brand';
+    var c = style === 'solid'
+      ? { blue: wp.color, olive: wp.color, gold: wp.color, highlight: 'none', word: wp.color }
+      : (WM_PALETTES[style] || WM_PALETTES.brand);
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + v[2] + '" height="' + v[3] + '" viewBox="' + v.join(' ') + '"><g opacity="' + op + '">' +
+      '<path fill="' + c.olive + '" d="' + LOGO_PATHS.olive + '"/>' +
+      '<path fill="' + c.blue + '" fill-rule="evenodd" d="' + LOGO_PATHS.blue + '"/>' +
+      (c.highlight === 'none' ? '' : '<path fill="' + c.highlight + '" d="' + LOGO_PATHS.highlight + '"/>') +
+      '<path fill="' + c.gold + '" d="' + LOGO_PATHS.gold + '"/>' +
+      (wp.kind === 'logo' ? '<path fill="' + c.word + '" d="' + LOGO_PATHS.elana + '"/>' : '') + '</g></svg>';
+  } else {
+    var text = wp.text || ' ';
+    var icon = wp.showIcon && WM_ICONS[wp.kind] ? WM_ICONS[wp.kind] : '';
+    var iconSize = icon ? 95 : 0, gap = icon ? 30 : 0;
+    var w = Math.ceil(iconSize + gap + wmMeasure(text, wp.bold) + 5), h = 125;
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">' +
+      '<g opacity="' + op + '" style="color:' + wp.color + '">' +
+      (icon ? '<svg x="0" y="' + ((h - iconSize) / 2) + '" width="' + iconSize + '" height="' + iconSize + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+        'stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + icon + '</svg>' : '') +
+      '<text x="' + (iconSize + gap) + '" y="93" font-family="' + WM_FONT + '" font-weight="' + (wp.bold ? 700 : 500) +
+      '" font-size="100" fill="' + wp.color + '">' + esc(text) + '</text></g></svg>';
+  }
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
 function frameSection(s) {

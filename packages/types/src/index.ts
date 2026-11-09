@@ -1366,3 +1366,5 @@ export interface CameraAutoConfigResult {
 }
 
 export * from './themeTokens';
+
+export { KELANA_LOGO_PATHS } from './kelanaLogo';
