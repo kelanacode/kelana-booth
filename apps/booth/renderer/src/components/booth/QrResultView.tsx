@@ -2,6 +2,7 @@ import React from 'react';
 import type { BoothCopywriting, BoothTheme, FrameConfig } from '@photo-booth/types';
 import FrameCanvas from '../FrameCanvas';
 import { withAlpha } from '../../lib/appearance';
+import { resolveFrameTemplate } from '../../utils/frameConfig';
 
 export type ResultsPrintState = 'off' | 'printing' | 'queued' | 'ready' | 'error';
 export type ResultsUploadState = 'uploading' | 'done' | 'error';
@@ -86,21 +87,35 @@ export const QrResultView: React.FC<QrResultViewProps> = ({
         ? { tone: 'err' as const, label: copy.resultsUploadError }
         : { tone: 'busy' as const, label: copy.resultsUploading, pulse: true };
 
+  // Everything is sized from the screen (container query units), so the print
+  // is as large as the screen allows and the whole page always fits on one
+  // screen: side by side on landscape screens, stacked on portrait ones.
+  const printTemplate = frame ? resolveFrameTemplate(frame, photoSlotCount) : null;
+  const printRatio = printTemplate ? printTemplate.width / printTemplate.height : 2 / 3;
+  const hasPrint = !isTimedFlow && Boolean(frame);
+
   return (
     <div
-      className="pb-flow-anim relative flex h-full w-full items-center justify-center overflow-y-auto"
-      style={{ ...surfaceStyle, color: theme.foreground }}
+      className="pb-flow-anim relative flex h-full w-full items-center justify-center overflow-hidden"
+      style={{ ...surfaceStyle, color: theme.foreground, containerType: 'size' }}
     >
-      <div className="flex w-full max-w-5xl flex-col items-center gap-6 px-5 py-6 md:flex-row md:items-center md:justify-center md:gap-14">
-        {/* Small copy of the final print */}
-        {!isTimedFlow && frame && (
+      <div
+        className="flex h-full w-full items-center justify-center landscape:flex-row landscape:gap-[5cqw] landscape:px-[4cqw] landscape:py-[4cqh] portrait:flex-col portrait:gap-[2.2cqh] portrait:px-[4cqw] portrait:py-[2.5cqh]"
+        style={{ '--r': String(printRatio) } as React.CSSProperties}
+      >
+        {/* Copy of the final print, as large as the screen allows */}
+        {hasPrint && frame && (
           <div
-            className="w-[min(46vw,15rem)] shrink-0 bg-white p-2 md:w-[min(30vw,19rem)]"
+            className={`shrink-0 bg-white p-[0.6cqmin] ${
+              hasPrint
+                ? 'landscape:w-[min(50cqw,calc(84cqh*var(--r)))] portrait:w-[min(88cqw,calc(42cqh*var(--r)))]'
+                : ''
+            }`}
             style={
               {
-                '--pr': '-4deg',
+                '--pr': '-3deg',
                 boxShadow: `0 14px 34px ${withAlpha(theme.deep, 0.35)}`,
-                animation: 'pb-print-drop 0.8s cubic-bezier(0.2, 0.9, 0.3, 1.15) 0.1s both',
+                animation: 'pb-print-toss 1.3s linear 0.1s both',
               } as React.CSSProperties
             }
           >
@@ -108,10 +123,10 @@ export const QrResultView: React.FC<QrResultViewProps> = ({
           </div>
         )}
 
-        <div className="flex w-full max-w-md flex-col items-center gap-4 text-center">
+        <div className="flex flex-col items-center text-center landscape:w-[min(38cqw,34rem)] landscape:gap-[2.6cqh] portrait:w-[min(88cqw,34rem)] portrait:gap-[1.6cqh]">
           <div style={{ animation: 'pb-rise-pop 0.6s cubic-bezier(0.2, 0.9, 0.3, 1.2) 0.2s both' }}>
-            <h1 className="text-2xl font-black uppercase leading-none tracking-[-0.03em] sm:text-4xl">{copy.resultsTitle}</h1>
-            <p className="mt-2 text-sm font-semibold opacity-80 sm:text-base">
+            <h1 className="font-black uppercase leading-none tracking-[-0.03em] landscape:text-[clamp(1.4rem,6.5cqh,4rem)] portrait:text-[clamp(1.3rem,3.6cqh,3.5rem)]">{copy.resultsTitle}</h1>
+            <p className="mt-[1cqh] font-semibold opacity-80 landscape:text-[clamp(0.85rem,2.4cqh,1.5rem)] portrait:text-[clamp(0.8rem,1.7cqh,1.4rem)]">
               {isTimedFlow ? copy.resultsQrArrange : copy.resultsSubtitle}
             </p>
           </div>
@@ -129,9 +144,9 @@ export const QrResultView: React.FC<QrResultViewProps> = ({
             aria-label={copy.resultsQrModalTitle}
           >
             {qrDataUrl ? (
-              <img src={qrDataUrl} alt="QR" className="h-52 w-52 sm:h-60 sm:w-60" />
+              <img src={qrDataUrl} alt="QR" className={QR_SIZE} />
             ) : (
-              <span className="grid h-52 w-52 place-items-center text-sm font-bold opacity-60 sm:h-60 sm:w-60" style={{ color: theme.deep }}>
+              <span className={`grid place-items-center text-sm font-bold opacity-60 ${QR_SIZE}`} style={{ color: theme.deep }}>
                 {copy.resultsGeneratingQr}
               </span>
             )}
@@ -157,7 +172,7 @@ export const QrResultView: React.FC<QrResultViewProps> = ({
             type="button"
             onClick={onFinish}
             disabled={!canFinish || !onFinish}
-            className="mt-1 min-h-12 w-full rounded-xl border-2 px-6 py-3 text-sm font-black uppercase tracking-[0.12em] shadow-[0_4px_0_rgba(0,0,0,0.18)] transition-transform enabled:hover:-translate-y-0.5 enabled:active:translate-y-0 disabled:opacity-50"
+            className="mt-1 min-h-12 w-full rounded-xl border-2 px-6 py-3 font-black uppercase tracking-[0.12em] landscape:text-[clamp(0.85rem,2.2cqh,1.4rem)] portrait:text-[clamp(0.85rem,1.6cqh,1.3rem)] shadow-[0_4px_0_rgba(0,0,0,0.18)] transition-transform enabled:hover:-translate-y-0.5 enabled:active:translate-y-0 disabled:opacity-50"
             style={
               {
                 borderColor: theme.deep,
@@ -175,5 +190,9 @@ export const QrResultView: React.FC<QrResultViewProps> = ({
     </div>
   );
 };
+
+/** QR size from the screen: big on landscape, leaves room for the print on portrait. */
+const QR_SIZE =
+  'landscape:h-[min(42cqh,30cqw)] landscape:w-[min(42cqh,30cqw)] portrait:h-[min(22cqh,62cqw)] portrait:w-[min(22cqh,62cqw)]';
 
 export default QrResultView;
