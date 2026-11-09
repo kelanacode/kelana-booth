@@ -4,11 +4,11 @@ import { themeTokenCssVars, type BoothTheme } from '@photo-booth/types';
  * Guest queue page served at GET /q. One fixed QR near the booth points here;
  * it always serves the active event (see the 20261106000000_queue migration).
  *
- * The guest taps "Ambil nomor" and the page polls their place in line. The
- * phone vibrates (and shows a notification when allowed) as their turn gets
- * close, when they are next (the guest before them started their session) and
- * when it is their turn. A skipped guest can rejoin right after the next guest.
- * The ticket lives in localStorage, so re-scanning shows the same number.
+ * The guest taps "Ambil nomor" (or opens /q?t=<ticket>) and the page polls
+ * their place in line. No sound: when it is their turn the page flashes, and
+ * Android vibrates.
+ * A skipped guest can rejoin right after the next guest. The ticket lives in
+ * localStorage, so re-scanning shows the same number.
  */
 export const renderQueuePage = (params: { theme: BoothTheme }): string => {
   const themeVars = Object.entries(themeTokenCssVars(params.theme))
@@ -68,14 +68,6 @@ export const renderQueuePage = (params: { theme: BoothTheme }): string => {
   .pager button { margin-top:10px; padding:16px 30px; border:0; border-radius:999px; font:inherit; font-size:1.1rem; font-weight:800;
     background:#111; color:#fff; cursor:pointer; }
   @keyframes flash { 0% { background:var(--pbx-ui-hi); color:var(--pbx-ui-hi-fg); } 50% { background:#111; color:var(--pbx-ui-hi); } }
-  .modal { position:fixed; inset:0; z-index:20; background:rgb(0 0 0 / .72); display:flex; align-items:center; justify-content:center; padding:20px; }
-  .modal-box { width:min(100%,360px); text-align:center; padding:26px 22px 20px; border-radius:24px; background:var(--pbx-ui-panel);
-    border:1px solid rgb(255 255 255 / .14); box-shadow:0 20px 60px rgb(0 0 0 / .5); }
-  .modal-box .bell { font-size:3rem; line-height:1; }
-  .modal-box h2 { margin:12px 0 6px; font-size:1.25rem; }
-  .modal-box p { margin:0; font-size:.9rem; line-height:1.5; opacity:.75; }
-  .modal-box .btn { display:block; width:100%; margin-top:20px; }
-  .modal-box .later { margin-top:10px; background:none; border:0; color:#fff; opacity:.6; font:inherit; font-size:.85rem; cursor:pointer; padding:8px; }
   /* Frame picker: fullscreen page with a bento grid (landscape frames span
      two columns), then a fullscreen preview with previous / next, like the
      booth's frame picker. */
@@ -131,15 +123,6 @@ export const renderQueuePage = (params: { theme: BoothTheme }): string => {
   <div class="pnum" id="pagerNum"></div>
   <div>Silakan ke booth sekarang 📸</div>
   <button type="button" id="pagerOk">Oke, saya ke booth</button>
-</div>
-<div class="modal hidden" id="alertModal" role="dialog" aria-modal="true" aria-labelledby="alertModalTitle">
-  <div class="modal-box">
-    <div class="bell">🔔</div>
-    <h2 id="alertModalTitle">Aktifkan notifikasi</h2>
-    <p id="alertModalText">Biar HP-mu berbunyi saat giliranmu dekat, jadi kamu bisa santai dulu tanpa takut terlewat.</p>
-    <button class="btn" id="alertModalOk" type="button">🔔 Aktifkan notifikasi</button>
-    <button class="later" id="alertModalLater" type="button">Nanti saja</button>
-  </div>
 </div>
 <div class="sheet hidden" id="sheet">
   <div class="sheet-head">
@@ -372,368 +355,41 @@ function chooseFrame(id) {
 
 function view(html) { document.getElementById('view').innerHTML = html; }
 
-// Browsers only allow sound and vibration after the guest has touched the
-// page (and again after every reload), so the page shows an "Aktifkan" button
-// until it has been tapped in this page load.
-var audioCtx = null;
-var alertsUnlocked = false;
-var swReg = null;
+// No sound here (guests watch this page). When
+// it is their turn the page shows a flashing full-screen card, and Android
+// phones vibrate (iPhone browsers cannot).
 var CAN_VIBRATE = typeof navigator.vibrate === 'function';
-
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/q-sw.js').then(function (reg) { swReg = reg; }).catch(function () {});
-}
-
-// Loud, pager-like tones: square waves at 2.6-3.1 kHz (where the ear is most
-// sensitive) through a compressor at full gain. A page can never play louder
-// than the phone's own volume setting.
-var master = null;
-var pagerNodes = [];
-function out() {
-  if (!audioCtx) return null;
-  if (!master) {
-    var comp = audioCtx.createDynamicsCompressor();
-    comp.threshold.value = -6;
-    comp.knee.value = 0;
-    comp.ratio.value = 20;
-    comp.attack.value = 0.001;
-    comp.release.value = 0.05;
-    master = audioCtx.createGain();
-    master.gain.value = 1;
-    master.connect(comp).connect(audioCtx.destination);
-  }
-  return master;
-}
-
-function tone(t, freq, dur, keep) {
-  var dest = out();
-  if (!dest) return;
-  var osc = audioCtx.createOscillator();
-  var gain = audioCtx.createGain();
-  osc.type = 'square';
-  osc.frequency.value = freq;
-  gain.gain.setValueAtTime(0.0001, t);
-  gain.gain.linearRampToValueAtTime(1, t + 0.005);
-  gain.gain.setValueAtTime(1, t + dur - 0.01);
-  gain.gain.linearRampToValueAtTime(0.0001, t + dur);
-  osc.connect(gain).connect(dest);
-  osc.start(t);
-  osc.stop(t + dur + 0.02);
-  if (keep) pagerNodes.push(osc);
-}
-
-function beep(times) {
-  if (!audioCtx) return;
-  try {
-    var t = audioCtx.currentTime + 0.02;
-    for (var i = 0; i < times; i++) {
-      tone(t, i % 2 ? 3100 : 2600, 0.18);
-      t += 0.26;
-    }
-  } catch (e) {}
-}
-
-// iPhone Safari suspends Web Audio after the screen locks or the guest
-// switches apps, and only a touch can wake it again. So the alarm is a plain
-// <audio> element (a generated pager-trill WAV, looping) started muted on the
-// guest's first touch: once playing it needs no further touch, and turning
-// the sound on is just un-muting it. Media audio also ignores the iPhone
-// silent switch, unlike Web Audio.
-var alarm = null;
-
-// The WAV starts with a short silent lead-in, so the instant it plays while
-// being unlocked (see primeAlarm) is inaudible.
-var ALARM_LEAD = 0.3;
-
-function pagerWavUrl() {
-  var rate = 22050, seconds = ALARM_LEAD + PAGER_CYCLE;
-  var n = Math.floor(rate * seconds);
-  var buf = new ArrayBuffer(44 + n * 2);
-  var v = new DataView(buf);
-  var w = function (o, str) { for (var i = 0; i < str.length; i++) v.setUint8(o + i, str.charCodeAt(i)); };
-  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
-  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
-  w(36, 'data'); v.setUint32(40, n * 2, true);
-  for (var i = 0; i < n; i++) {
-    var t = i / rate - ALARM_LEAD;
-    var sample = 0;
-    if (t >= 0) {
-      var k = Math.floor(t / 0.09);
-      if (k < 6 && t - k * 0.09 < 0.07) {
-        var f = k % 2 ? 3100 : 2600;
-        sample = Math.sin(2 * Math.PI * f * t) >= 0 ? 0.95 : -0.95;
-      }
-    }
-    v.setInt16(44 + i * 2, sample * 32767, true);
-  }
-  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
-}
-
-// Browsers only let a page start sound later, without a touch, if that same
-// audio element was really (unmuted) played during a touch. Muted playback
-// does not count, which is why an earlier version stayed silent. So on every
-// touch the alarm is played for an instant (inside the silent lead-in) and
-// paused again; ringing later is then just play().
-var ringing = false;
-
-// Diagnostics: open /q?debug=1 to see what the audio is doing on the phone.
-var DEBUG = /[?&]debug=1/.test(location.search);
-var dbgLines = [];
-function dbg(msg) {
-  if (!DEBUG) return;
-  dbgLines.push(new Date().toLocaleTimeString() + ' ' + msg);
-  dbgLines = dbgLines.slice(-12);
-  renderDbg();
-}
-function renderDbg() {
-  if (!DEBUG) return;
-  var box = document.getElementById('dbg');
-  if (!box) {
-    box = document.createElement('pre');
-    box.id = 'dbg';
-    box.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99;margin:0;max-height:40vh;overflow:auto;' +
-      'background:rgba(0,0,0,.85);color:#0f0;font:11px/1.35 monospace;padding:8px;white-space:pre-wrap;';
-    document.body.appendChild(box);
-    var test = document.createElement('button');
-    test.textContent = 'Tes pager (bunyi 5 detik lagi)';
-    test.style.cssText = 'position:fixed;right:8px;bottom:calc(40vh + 8px);z-index:100;padding:10px 14px;border:0;border-radius:999px;' +
-      'background:#0f0;color:#000;font:bold 13px system-ui;';
-    test.onclick = function () {
-      dbg('test armed: rings in 5s with no touch');
-      setTimeout(function () { pagerAckNumber = null; startPager(0, 'Tes pager'); }, 5000);
-    };
-    document.body.appendChild(test);
-  }
-  var a = alarm;
-  box.textContent = 'stage=' + lastStage + ' unlocked=' + alertsUnlocked + ' ringing=' + ringing + ' pager=' + pagerOn +
-    '\\nalarm=' + (a ? 'paused=' + a.paused + ' muted=' + a.muted + ' ready=' + a.readyState + ' t=' + a.currentTime.toFixed(2) +
-      (a.error ? ' err=' + a.error.code : '') : 'none') +
-    ' audioCtx=' + (audioCtx ? audioCtx.state : 'none') + ' notif=' + notifPermission() + ' visible=' + !document.hidden +
-    '\\n' + dbgLines.join('\\n');
-}
-if (DEBUG) setInterval(renderDbg, 1000);
-function primeAlarm() {
-  try {
-    if (!alarm) {
-      alarm = new Audio(pagerWavUrl());
-      alarm.loop = true;
-      alarm.preload = 'auto';
-      alarm.setAttribute('playsinline', '');
-    }
-    if (ringing) return;
-    alarm.muted = false;
-    seek(0);
-    var p = alarm.play();
-    var stop = function () { dbg('prime ok'); if (!ringing) { alarm.pause(); seek(0); } };
-    if (p && p.then) p.then(stop, function (err) { dbg('prime blocked: ' + (err && err.name)); });
-    else stop();
-  } catch (e) { dbg('prime error: ' + e.name); }
-}
-
-// Setting the position on audio that has not loaded yet throws in Safari
-// (iPhone never preloads). Never let that stop play() from being called.
-function seek(t) {
-  try { alarm.currentTime = t; } catch (e) {}
-}
-
-var alarmOffTimer = 0;
-// Sound the alarm for ms milliseconds (0 = until silenced); false if it cannot.
-function soundAlarm(ms) {
-  if (!alarm) return false;
-  clearTimeout(alarmOffTimer);
-  ringing = true;
-  try {
-    alarm.muted = false;
-    seek(ALARM_LEAD);
-    var p = alarm.play();
-    if (p && p.then) p.then(function () { dbg('ring ok'); }, function (err) { ringing = false; dbg('ring blocked: ' + (err && err.name)); });
-  } catch (e) { ringing = false; dbg('ring error: ' + e.name); return false; }
-  if (ms) alarmOffTimer = setTimeout(silenceAlarm, ms);
-  return true;
-}
-
-function silenceAlarm() {
-  clearTimeout(alarmOffTimer);
-  ringing = false;
-  if (alarm) { try { alarm.pause(); } catch (e) {} seek(0); }
-}
-
-function unlockAlerts() {
-  try {
-    var Ctx = window.AudioContext || window.webkitAudioContext;
-    if (Ctx && !audioCtx) audioCtx = new Ctx();
-    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
-  } catch (e) {}
-  primeAlarm();
-  alertsUnlocked = true;
-}
-
-// Re-prime on every touch so the permission stays fresh.
-document.addEventListener('pointerdown', function () {
-  if (alertsUnlocked) primeAlarm();
-}, { capture: true, passive: true });
-
-var NOTIF_SUPPORTED = 'Notification' in window;
-function notifPermission() {
-  try { return NOTIF_SUPPORTED ? Notification.permission : 'unsupported'; } catch (e) { return 'unsupported'; }
-}
-
-function notify(text) {
-  try {
-    if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    var opts = { body: text, tag: 'kelana-queue', renotify: true, vibrate: [300, 120, 300] };
-    // Android Chrome only shows notifications through the service worker.
-    if (swReg && swReg.showNotification) swReg.showNotification('Antrian Photobooth', opts);
-    else new Notification('Antrian Photobooth', opts);
-  } catch (e) {}
-}
-
-function fireAlert(stage, text) {
-  if (CAN_VIBRATE) navigator.vibrate(stage === 'now' ? [500, 150, 500, 150, 500] : [300, 120, 300]);
-  // Two trills via the always-on <audio> alarm; Web Audio beep as a fallback.
-  if (!soundAlarm(PAGER_CYCLE * 2000)) beep(stage === 'now' ? 4 : 2);
-  notify(text);
-}
-
-// Restaurant-pager mode for "it's your turn": a trill every 1.5s plus
-// vibration and a flashing full-screen card, until the guest taps "Oke" or the
-// turn passes (session started, skipped, paused). The trills are scheduled up
-// to 60s ahead on the audio clock so they keep sounding even if the browser
-// slows this page's timers down.
 var pagerOn = false;
 var pagerAckNumber = null;
-var pagerScheduledTo = 0;
-var pagerTimer = 0;
-var PAGER_CYCLE = 1.5;
 
-function schedulePager() {
-  if (!audioCtx) return;
-  var now = audioCtx.currentTime;
-  if (pagerScheduledTo < now) pagerScheduledTo = now + 0.05;
-  while (pagerScheduledTo < now + 60) {
-    for (var i = 0; i < 6; i++) tone(pagerScheduledTo + i * 0.09, i % 2 ? 3100 : 2600, 0.07, true);
-    pagerScheduledTo += PAGER_CYCLE;
-  }
+function buzz(pattern) {
+  try { if (CAN_VIBRATE) navigator.vibrate(pattern); } catch (e) {}
 }
 
-function pagerTick() {
-  if (!pagerOn) return;
-  // Primary: the looping <audio> alarm. Fallback: scheduled Web Audio trills.
-  if (ringing && alarm && !alarm.paused) {
-    // already ringing
-  } else if (!soundAlarm(0)) {
-    try { if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume(); } catch (e) {}
-    schedulePager();
-  }
-  if (CAN_VIBRATE) navigator.vibrate([600, 200, 600]);
-}
-
-function startPager(number, text) {
+function startPager(number) {
   if (pagerOn || pagerAckNumber === number) return;
   pagerOn = true;
   document.getElementById('pagerNum').textContent = number;
   document.getElementById('pager').classList.remove('hidden');
-  notify(text);
-  pagerTick();
-  pagerTimer = setInterval(pagerTick, 2000);
+  buzz([500, 150, 500, 150, 500]);
 }
 
 function stopPager() {
   if (!pagerOn) return;
   pagerOn = false;
-  clearInterval(pagerTimer);
-  silenceAlarm();
-  pagerNodes.forEach(function (osc) { try { osc.stop(); } catch (e) {} });
-  pagerNodes = [];
-  pagerScheduledTo = 0;
-  if (CAN_VIBRATE) navigator.vibrate(0);
   document.getElementById('pager').classList.add('hidden');
 }
 
-function alertGuest(stage, text, number) {
+function alertGuest(stage, number) {
   if (stage === 'now') {
     lastStage = stage;
-    startPager(number, text);
+    startPager(number);
     return;
   }
   stopPager();
   if (stage === lastStage) return;
   lastStage = stage;
-  fireAlert(stage, text);
-}
-
-// Auto-activate on the guest's first touch anywhere (tapping "Ambil Nomor"
-// or a frame counts). Browsers refuse sound/vibration before any touch.
-// Any touch unlocks sound/vibration silently; the notification permission is
-// only asked from the button, so no popup appears out of nowhere.
-function autoUnlock() {
-  if (alertsUnlocked) return;
-  unlockAlerts();
-}
-['pointerdown', 'touchstart', 'keydown'].forEach(function (type) {
-  document.addEventListener(type, autoUnlock, { capture: true, passive: true });
-});
-
-function alertsCard() {
-  var perm = notifPermission();
-  if (perm === 'default' || (perm === 'unsupported' && !alertsUnlocked)) {
-    return '<button class="btn" id="enableAlerts" type="button">🔔 Aktifkan ' +
-      (perm === 'unsupported' ? 'bunyi' : 'notifikasi') + '</button>' +
-      (perm === 'unsupported' && !CAN_VIBRATE
-        ? '<p class="hint">Di iPhone, pemberitahuan berupa bunyi selama halaman ini terbuka.</p>' : '');
-  }
-  if (perm === 'denied') {
-    return '<p class="hint">🔕 Notifikasi diblokir. Izinkan notifikasi untuk situs ini di pengaturan browser.</p>';
-  }
-  return '<p class="hint">✓ ' + (perm === 'granted' ? 'Notifikasi aktif' : 'Bunyi aktif') + '</p>';
-}
-
-// First visit: ask in a modal so the guest notices it. Shown once per page
-// load; "Nanti saja" leaves the inline button as a fallback.
-var modalShown = false;
-function needsAlertPrompt() {
-  var perm = notifPermission();
-  return perm === 'default' || (perm === 'unsupported' && !alertsUnlocked);
-}
-function maybeShowAlertModal() {
-  if (modalShown || !needsAlertPrompt()) return;
-  modalShown = true;
-  var unsupported = notifPermission() === 'unsupported';
-  document.getElementById('alertModalTitle').textContent = unsupported ? 'Aktifkan bunyi' : 'Aktifkan notifikasi';
-  document.getElementById('alertModalOk').textContent = unsupported ? '🔔 Aktifkan bunyi' : '🔔 Aktifkan notifikasi';
-  if (unsupported) {
-    document.getElementById('alertModalText').textContent =
-      'Biar HP-mu berbunyi saat giliranmu dekat. Biarkan halaman ini tetap terbuka ya.';
-  }
-  document.getElementById('alertModal').classList.remove('hidden');
-}
-function closeAlertModal() { document.getElementById('alertModal').classList.add('hidden'); }
-
-function enableAlerts() {
-  closeAlertModal();
-  unlockAlerts();
-  beep(1);
-  if (CAN_VIBRATE) navigator.vibrate(150);
-  var done = function () { poll(); };
-  try {
-    if (NOTIF_SUPPORTED && Notification.permission === 'default') {
-      var res = Notification.requestPermission(done);
-      if (res && res.then) res.then(done, done);
-      return;
-    }
-  } catch (e) {}
-  done();
-}
-
-function wireAlertsButton() {
-  var b = document.getElementById('enableAlerts');
-  if (b) b.onclick = enableAlerts;
-  maybeShowAlertModal();
-}
-
-function askNotify() {
-  unlockAlerts();
+  buzz([300, 120, 300]);
 }
 
 function showTake(reason) {
@@ -746,7 +402,6 @@ function showTake(reason) {
   var btn = document.getElementById('take');
   if (btn) btn.onclick = function () {
     btn.disabled = true;
-    askNotify();
     api('/api/queue/take', 'POST').then(function (res) {
       if (res && res.ok) { store(TICKET_KEY, res.ticket_id); lastStage = ''; poll(); }
       else showTake(res && res.reason === 'disabled' ? 'disabled' : 'error');
@@ -814,18 +469,15 @@ function render(s) {
     '<div class="stat"><b>' + s.ahead + '</b><span>Antrian lagi</span></div>' +
     (eta ? '<div class="stat"><b style="font-size:1.1rem;line-height:1.9rem">' + eta + '</b><span>Estimasi</span></div>' : '') +
     '</div>' + (s.enabled ? msg : '<p class="msg">Antrian sedang dijeda oleh petugas. Nomormu tetap aman.</p>') +
-    alertsCard() + frameSection(s) +
-    '<p class="hint">Biarkan halaman ini terbuka agar HP berbunyi' + (CAN_VIBRATE ? ' dan bergetar' : '') +
-    ' saat giliranmu dekat.</p>';
+    frameSection(s) +
+    '<p class="hint">Halaman ini ter-update otomatis. Buka lagi kapan saja untuk cek antrianmu.</p>';
   view(html);
   wireFrameButton();
-  wireAlertsButton();
   if (!s.enabled) {
     stopPager();
     lastStage = 'paused';
   } else if (stage !== 'wait') {
-    alertGuest(stage, stage === 'now' ? 'Giliranmu sekarang! Silakan ke booth.' :
-      stage === 'next' ? 'Kamu berikutnya, ke booth sekarang.' : 'Giliranmu sebentar lagi.', s.number);
+    alertGuest(stage, s.number);
   } else {
     stopPager();
     lastStage = 'wait';
@@ -852,12 +504,16 @@ function poll() {
   }).catch(function () { schedule(); });
 }
 
-document.getElementById('alertModalOk').onclick = enableAlerts;
 document.getElementById('pagerOk').onclick = function () {
   pagerAckNumber = Number(document.getElementById('pagerNum').textContent);
   stopPager();
 };
-document.getElementById('alertModalLater').onclick = closeAlertModal;
+// /q?t=<ticket> opens that guest's ticket in
+// any browser; it is saved like a ticket taken on this page.
+(function () {
+  var m = location.search.match(/[?&]t=([0-9a-fA-F-]{36})/);
+  if (m) store(TICKET_KEY, m[1]);
+})();
 document.getElementById('sheetClose').onclick = closeSheet;
 document.getElementById('sheet').addEventListener('click', function (e) { if (e.target.id === 'sheet') closeSheet(); });
 document.addEventListener('visibilitychange', function () { if (!document.hidden && load(TICKET_KEY)) poll(); });
