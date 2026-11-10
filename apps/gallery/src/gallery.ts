@@ -165,8 +165,9 @@ export const renderGallery = (params: {
   .viewer { position:fixed; inset:0; z-index:50; background:#08030f; display:flex; flex-direction:column; }
   .v-top { display:flex; align-items:center; justify-content:space-between; padding:calc(12px + env(safe-area-inset-top, 0px)) var(--gutter-r) 8px var(--gutter-l); }
   .v-ctr { font-size:.88rem; font-weight:700; color:var(--fg-2); font-variant-numeric:tabular-nums; }
-  .v-stage { flex:1; min-height:0; position:relative; display:grid; place-items:center; overflow:hidden; touch-action:pan-y pinch-zoom; }
-  .v-stage img { max-width:calc(100% - 24px); max-height:100%; object-fit:contain; border-radius:6px; transition:transform .2s ease, opacity .2s ease; user-select:none; -webkit-user-drag:none; }
+  .v-stage { flex:1; min-height:0; position:relative; overflow:hidden; touch-action:pan-y pinch-zoom; }
+  /* Absolutely centered so max-height resolves against the stage: tall framed strips shrink to fit instead of being cut off. */
+  .v-stage img { position:absolute; inset:0; margin:auto; width:auto; height:auto; max-width:calc(100% - 24px); max-height:calc(100% - 8px); object-fit:contain; border-radius:6px; transition:transform .2s ease, opacity .2s ease; user-select:none; -webkit-user-drag:none; }
   .v-nav { position:absolute; top:50%; transform:translateY(-50%); width:42px; height:42px; border-radius:50%; border:0; background:rgba(255,255,255,.12); cursor:pointer; display:grid; place-items:center; color:#fff; }
   .v-nav svg { width:20px; height:20px; }
   .v-prev { left:max(10px, env(safe-area-inset-left, 0px)); }
