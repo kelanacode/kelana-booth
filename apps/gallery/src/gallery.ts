@@ -12,13 +12,24 @@ const KELANA_WHATSAPP =
   'https://wa.me/6285287560280?text=' +
   encodeURIComponent('Halo Kelana! Saya lihat hasil photobooth-nya dan tertarik sewa photobooth untuk acara saya.');
 
+/** How long the gallery promises to keep a session's files (shown to guests). */
+const RETENTION_DAYS = 3;
+
+/** The brand logo with its own class, so header and footer can size it separately. */
+const kelanaLogo = (className: string): string =>
+  KELANA_LOGO_SVG.replace('class="contact-logo"', `class="${className}"`);
+
 /**
  * Self-contained gallery page served at GET /p/:token.
- * It fetches the session file list from the Worker and renders the framed
- * photo, the animated GIF, and the original photos in a layout modeled on the
- * admin "Session results" view: a header with QR / title / token / timestamp,
- * then framed outputs on the left and the photo grid on the right, with
- * download-all and per-photo selection. No external CDNs.
+ *
+ * Built for the guest's phone (they arrive by scanning the booth QR): the
+ * framed print is the hero with one "save" action, the animated versions sit
+ * under it, then every raw photo. Tapping any picture opens a swipeable
+ * viewer. On touch devices saving goes through the phone's share sheet
+ * (navigator.share with files) so guests can "Save image" straight to their
+ * photo library; desktops download the file, or a ZIP for several. The page
+ * polls the Worker while the booth is still producing outputs, then stops.
+ * No external CDNs.
  */
 export const renderGallery = (params: {
   token: string;
@@ -34,191 +45,209 @@ export const renderGallery = (params: {
   const createdAtJson = JSON.stringify(params.createdAt);
   const qrJson = JSON.stringify(params.qr);
   return `<!doctype html>
-<html lang="en">
+<html lang="id">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <meta name="robots" content="noindex"/>
-<title>Hasil Foto Mu · Kelana</title>
+<meta name="theme-color" content="#140823"/>
+<title>Hasil Fotomu · Kelana</title>
+<meta property="og:title" content="Hasil foto photobooth Kelana"/>
+<meta property="og:description" content="Lihat dan simpan semua foto dari photobooth Kelana."/>
 <link rel="icon" type="image/svg+xml" href="${KELANA_FAVICON}"/>
 <style>
-  :root { ${themeVars} --pink:var(--pbx-ui-brand); --pink-fg:var(--pbx-ui-brand-fg); --purple:var(--pbx-ui-secondary); --dark:var(--pbx-ui-panel); --lime:var(--pbx-ui-hi); --panel:var(--pbx-ui-raised); --card:var(--pbx-ui-raised); }
+  :root { ${themeVars}
+    --bg:var(--pbx-ui-bg); --panel:var(--pbx-ui-panel); --raised:var(--pbx-ui-raised); --raised-2:var(--pbx-ui-raised-2);
+    --brand:var(--pbx-ui-brand); --brand-fg:var(--pbx-ui-brand-fg); --hi:var(--pbx-ui-hi); --hi-fg:var(--pbx-ui-hi-fg);
+    --fg:#fff; --fg-2:rgba(255,255,255,.68); --fg-3:rgba(255,255,255,.48); --line:rgba(255,255,255,.1);
+    --gutter-l:max(16px, env(safe-area-inset-left, 0px)); --gutter-r:max(16px, env(safe-area-inset-right, 0px));
+    color-scheme:dark;
+  }
   * { box-sizing:border-box; }
   html, body { margin:0; }
   body {
-    min-height:100vh; color:#fff;
-    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    background:
-      radial-gradient(1100px 520px at 50% -10%, rgb(var(--pbx-ui-secondary-rgb) / .28), transparent 60%),
-      linear-gradient(180deg,var(--pbx-ui-bg) 0%, var(--pbx-ui-panel) 55%, var(--pbx-ui-raised-2) 100%);
+    min-height:100vh; color:var(--fg); background-color:var(--bg);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; -webkit-font-smoothing:antialiased;
+    background-image:
+      radial-gradient(640px 360px at 50% -80px, rgb(var(--pbx-ui-secondary-rgb) / .3), transparent 70%),
+      linear-gradient(180deg, var(--bg) 0%, var(--panel) 55%, var(--raised) 100%);
+    background-attachment:fixed;
   }
-  .wrap { max-width:1152px; margin:0 auto; padding:0 18px 72px; }
-
-  /* Header — mirrors the admin results modal header (QR + title + token). */
-  .ghead { display:flex; flex-wrap:wrap; align-items:center; gap:16px; padding:20px 0 16px; border-bottom:1px solid rgba(255,255,255,.1); }
-  .ghead-left { display:flex; align-items:center; gap:16px; min-width:0; }
-  .gqr { width:64px; height:64px; border-radius:12px; background:#fff; padding:4px; flex-shrink:0; border:0; cursor:pointer; }
-  .gqr:hover { transform:scale(1.05); }
-  .gqr img { width:100%; height:100%; display:block; }
-  .gqr.ph { display:grid; place-items:center; }
-  .gqr.ph svg { width:30px; height:30px; opacity:.4; color:#fff; }
-  .gtitles { min-width:0; }
-  .gtitle { margin:0; font-size:1.3rem; font-weight:800; letter-spacing:-0.01em; }
-  .gsub { margin:3px 0 0; font-size:.72rem; color:rgba(255,255,255,.55); font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .gsub .sep { padding:0 7px; }
-
-  /* All-time/download controls (top-right of header, admin-style). */
-  .ghead-right { margin-left:auto; display:flex; align-items:center; gap:10px; }
-
-  /* Two-column layout: framed outputs (1/3) + photos (2/3). */
-  .grid3 { display:grid; grid-template-columns:1fr; gap:28px; margin-top:26px; align-items:start; }
-  @media (min-width:1024px){ .grid3 { grid-template-columns:1fr 2fr; gap:36px; } }
-  .col-side { display:grid; gap:28px; align-content:start; min-width:0; }
-
-  .card { background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); border-radius:18px; padding:16px; }
-  .card h4 { display:flex; align-items:center; gap:7px; font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.12em; color:rgba(255,255,255,.6); margin:0 0 12px; }
-  .card h4 svg { width:16px; height:16px; flex-shrink:0; }
-  .res { position:relative; display:block; overflow:hidden; border-radius:12px; border:1px solid rgba(255,255,255,.12); background:var(--card); cursor:pointer; border:0; padding:0; width:100%; }
-  .res.sq { aspect-ratio:1/1; background:rgba(0,0,0,.3); padding:10px; }
-  .res.sq img { width:100%; height:100%; object-fit:contain; }
-  .res img { width:100%; height:100%; display:block; transition:transform .15s ease; }
-  .res:hover img { transform:scale(1.03); }
-  .res .cap { position:absolute; left:0; right:0; bottom:0; display:flex; align-items:center; gap:6px; background:rgba(0,0,0,.7); padding:6px 9px; font-size:.76rem; font-weight:700; color:rgba(255,255,255,.92); text-align:left; }
-  .res .cap svg { width:15px; height:15px; flex-shrink:0; }
-
-  /* Photos column. */
-  .col-main { min-width:0; }
-  .ph-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
-  .ph-head h4 { display:flex; align-items:center; gap:7px; font-size:.78rem; font-weight:700; text-transform:uppercase; letter-spacing:.12em; color:rgb(var(--pbx-ui-hi-rgb) / .9); margin:0; }
-  .ph-head h4 svg { width:16px; height:16px; }
-  .ph-head .hint { font-size:.72rem; color:rgba(255,255,255,.5); }
-  .pgrid { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; }
-  @media (min-width:640px){ .pgrid { grid-template-columns:repeat(3,1fr); } }
-  @media (min-width:1150px){ .pgrid { grid-template-columns:repeat(4,1fr); } }
-  .tile { position:relative; aspect-ratio:1/1; overflow:hidden; border:3px solid transparent; border-radius:12px; background:#000; cursor:pointer; }
-  .tile img { width:100%; height:100%; object-fit:cover; display:block; transition:transform .15s ease; }
-  .tile:hover img { transform:scale(1.04); }
-  .tile.sel { border-color:var(--pink); }
-  .tile.sel img { opacity:.85; }
-  .tile .badge { position:absolute; top:8px; left:8px; width:24px; height:24px; border-radius:50%; background:var(--pink); color:var(--pink-fg); display:none; align-items:center; justify-content:center; font-size:12px; font-weight:900; z-index:2; }
-  .tile.sel .badge { display:flex; }
-  .eye { position:absolute; top:8px; right:8px; width:32px; height:32px; border-radius:50%; background:rgba(0,0,0,.55); color:#fff; display:flex; align-items:center; justify-content:center; border:2px solid rgba(255,255,255,.35); cursor:pointer; z-index:2; opacity:.85; transition:opacity .15s, transform .15s; }
-  .eye:hover { transform:scale(1.1); opacity:1; }
-  .eye svg { width:18px; height:18px; display:block; }
-
-  .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; align-items:center; }
-  .count { font-size:.78rem; font-weight:800; opacity:.9; margin-left:auto; }
-  .btn { display:inline-flex; align-items:center; justify-content:center; background:var(--pink); color:var(--pink-fg); font-weight:900; padding:10px 20px; border-radius:999px; text-decoration:none; font-size:.86rem; border:none; cursor:pointer; }
-  .btn.sm { padding:7px 14px; font-size:.76rem; }
-  .btn.ghost { background:rgba(255,255,255,.14); }
-  .btn:disabled { opacity:.55; cursor:not-allowed; }
+  button { font:inherit; color:inherit; }
+  :focus-visible { outline:3px solid var(--hi); outline-offset:2px; }
   .hidden { display:none !important; }
+  .wrap { max-width:1080px; margin:0 auto; padding-left:var(--gutter-l); padding-right:var(--gutter-r); }
 
-  /* "Outputs still being generated/uploaded" indicator. */
-  .note { margin-top:26px; display:flex; gap:10px; align-items:center; justify-content:center; text-align:center; background:rgb(var(--pbx-ui-hi-rgb) / .12); border:2px solid rgb(var(--pbx-ui-hi-rgb) / .5); border-radius:14px; padding:12px 16px; font-size:.9rem; font-weight:800; color:var(--lime); }
-  .note.err { background:rgba(255,94,135,.12); border-color:rgba(255,94,135,.55); color:#ffd0e8; }
-  .note .spin { display:inline-block; width:14px; height:14px; border:2px solid rgb(var(--pbx-ui-hi-rgb) / .4); border-top-color:var(--lime); border-radius:50%; animation:spin 1s linear infinite; }
-  @keyframes spin { to { transform:rotate(360deg); } }
-
-  .status { text-align:center; padding:70px 0; opacity:.85; }
-  .err { text-align:center; color:#ffd0e8; padding:70px 20px; font-weight:700; }
-  @keyframes pulse { 50% { opacity:.35; } }
-  .pulse { animation: pulse 1.2s ease-in-out infinite; }
-
-  /* Fullscreen image viewer — keep the existing tap-to-enlarge modal. */
-  .viewer { position:fixed; inset:0; z-index:50; background:rgb(var(--pbx-ui-bg-rgb) / .96); display:flex; align-items:center; justify-content:center; padding:24px; }
-  .viewer img { max-width:92vw; max-height:78vh; width:auto; height:auto; border-radius:10px; background:#fff; box-shadow:0 12px 40px rgba(0,0,0,.55); }
-  .viewer img.square { border-radius:0; }
-  .viewer-close { position:absolute; top:16px; right:16px; width:46px; height:46px; border-radius:50%; border:none; background:var(--pink); color:var(--pink-fg); font-size:1.25rem; font-weight:900; cursor:pointer; box-shadow:0 3px 10px rgba(0,0,0,.35); }
-  .viewer-close:hover { transform:scale(1.08); }
-  .viewer-bar { position:absolute; left:0; right:0; bottom:0; padding:18px 24px 22px; display:flex; align-items:center; justify-content:center; gap:14px; background:linear-gradient(0deg, rgb(var(--pbx-ui-bg-rgb) / .9), transparent); }
-  .viewer-bar .name { font-size:.82rem; font-weight:700; opacity:.9; max-width:50%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .viewer .btn { margin-top:0; }
-
-  /* Enlarged QR modal. */
-  .qrmodal { position:fixed; inset:0; z-index:60; background:rgb(var(--pbx-ui-panel-rgb) / .95); display:none; align-items:center; justify-content:center; padding:20px; }
-  .qrmodal.open { display:flex; }
-  .qrmodal-box { width:min(360px,92vw); background:#fff; border:4px solid var(--pink); border-radius:18px; padding:22px; display:flex; flex-direction:column; align-items:center; gap:14px; animation:zoom .28s cubic-bezier(.2,.9,.3,1.2) both; }
-  .qrmodal-box h2 { margin:0; font-size:.82rem; font-weight:900; letter-spacing:.14em; text-transform:uppercase; color:var(--pbx-ink); text-align:center; }
-  .qrmodal-box img { width:min(280px,70vw); height:auto; border-radius:12px; }
-  .qrmodal-box p { margin:0; max-width:100%; overflow-wrap:anywhere; font-size:.62rem; font-weight:700; color:var(--pbx-ink); text-align:center; }
-  .qrmodal-box .btn { margin-top:2px; }
-  @keyframes zoom { from { transform:scale(.85); opacity:0; } to { transform:scale(1); opacity:1; } }
-
-  .contact { margin:44px auto 0; max-width:640px; text-align:center; padding:26px 22px 24px; border-radius:20px; background:var(--panel); border:1px solid rgba(255,255,255,.1); }
-  .contact-logo { display:block; height:44px; width:auto; margin:0 auto 14px; }
-  .contact h2 { margin:0 0 6px; font-size:1.15rem; font-weight:900; }
-  .contact p { margin:0 auto 18px; max-width:460px; font-size:.9rem; line-height:1.5; opacity:.8; }
-  .contact-actions { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; }
-  .contact-btn { display:inline-flex; align-items:center; gap:8px; padding:12px 18px; border-radius:999px; font-weight:800; font-size:.9rem; text-decoration:none; transition:transform .15s ease; }
-  .contact-btn:hover { transform:translateY(-1px); }
-  .contact-btn svg { width:20px; height:20px; flex-shrink:0; }
-  .contact-wa { background:#25D366; color:#073B1C; }
-  .contact-ig { background:linear-gradient(45deg,#F58529,#DD2A7B 55%,#8134AF); color:#fff; }
-  footer { text-align:center; margin-top:28px; opacity:.55; font-size:.8rem; }
-  .gprint { display:inline-flex; align-items:center; gap:6px; margin-top:6px; padding:3px 10px; border-radius:999px; font-size:.75rem; font-weight:700; background:rgba(255,255,255,.08); }
-  .gprint.ok { background:rgb(var(--pbx-ui-hi-rgb, 190 242 100) / .18); color:var(--pbx-ui-hi); }
+  /* Header */
+  .ghead { padding-top:calc(20px + env(safe-area-inset-top, 0px)); padding-bottom:4px; display:grid; gap:6px; }
+  .brand-logo { display:block; height:26px; width:auto; }
+  .gtitle { margin:10px 0 0; font-size:1.6rem; line-height:1.15; font-weight:850; letter-spacing:-.01em; text-wrap:balance; }
+  .gsub { margin:0; font-size:.88rem; color:var(--fg-2); }
+  .gprint { justify-self:start; display:inline-flex; align-items:center; gap:6px; margin-top:4px; padding:4px 11px; border-radius:999px; font-size:.78rem; font-weight:700; background:rgba(255,255,255,.08); }
+  .gprint.ok { background:rgb(var(--pbx-ui-hi-rgb) / .16); color:var(--hi); }
   .gprint.err { background:rgba(255,94,135,.15); color:#ff8aa8; }
   .gprint:empty { display:none; }
+
+  /* Notes (still generating / errors) */
+  .note { margin-top:16px; display:flex; gap:10px; align-items:center; padding:11px 13px; border-radius:12px; background:rgb(var(--pbx-ui-hi-rgb) / .1); border:1px solid rgb(var(--pbx-ui-hi-rgb) / .38); font-size:.86rem; line-height:1.4; }
+  .note.err { background:rgba(255,94,135,.12); border-color:rgba(255,94,135,.5); color:#ffd0e0; }
+  .spin { width:15px; height:15px; flex-shrink:0; border:2px solid rgb(var(--pbx-ui-hi-rgb) / .35); border-top-color:var(--hi); border-radius:50%; animation:spin 1s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  /* Layout: hero + animated on the left, photos on the right (desktop); stacked on phones. */
+  .layout { display:grid; gap:8px; }
+  @media (min-width:960px) { .layout { grid-template-columns:minmax(0,5fr) minmax(0,7fr); gap:40px; align-items:start; } .col-a { position:sticky; top:16px; } }
+  .col-a, .col-b { min-width:0; }
+
+  .hero { padding-top:18px; display:grid; gap:14px; }
+  .hero-img { justify-self:center; display:block; border:0; padding:0; background:none; cursor:zoom-in; border-radius:6px; box-shadow:0 18px 44px rgba(0,0,0,.55); transform:rotate(-1.2deg); transition:transform .2s ease; max-width:100%; }
+  .hero-img:hover { transform:rotate(0deg) scale(1.01); }
+  .hero-img img { display:block; max-height:clamp(240px, calc(100vh - 340px), 460px); max-height:clamp(240px, calc(100svh - 340px), 460px); max-width:100%; width:auto; height:auto; border-radius:6px; }
+  .hero-skel { justify-self:center; width:min(150px, 42vw); aspect-ratio:1/3; border-radius:8px; }
+  .row { display:flex; gap:10px; }
+  .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:48px; padding:0 20px; border-radius:14px; border:0; cursor:pointer; font-weight:800; font-size:.95rem; text-decoration:none; transition:transform .12s ease, opacity .12s ease; }
+  .btn:active { transform:scale(.98); }
+  .btn svg { width:20px; height:20px; flex-shrink:0; }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .btn-primary { flex:1; background:var(--brand); color:var(--brand-fg); }
+  .btn-ghost { background:rgba(255,255,255,.1); color:var(--fg); }
+  .btn-sm { min-height:36px; padding:0 14px; border-radius:10px; font-size:.84rem; }
+  .expiry { margin:0; font-size:.8rem; color:var(--fg-3); text-align:center; line-height:1.45; }
+  .expiry b { color:var(--fg-2); }
+
+  .sec { padding-top:28px; }
+  .sec-head { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
+  .sec-head h2 { margin:0; font-size:1.05rem; font-weight:800; }
+  .sec-head h2 span { color:var(--fg-3); font-weight:600; margin-left:4px; }
+  .anim { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .acard { min-width:0; background:rgba(255,255,255,.05); border:1px solid var(--line); border-radius:16px; padding:8px; display:grid; gap:8px; }
+  .thumb { position:relative; aspect-ratio:1/1; border-radius:10px; overflow:hidden; background:rgba(0,0,0,.35); border:0; padding:0; cursor:zoom-in; width:100%; display:block; }
+  .thumb img { width:100%; height:100%; object-fit:contain; display:block; }
+  .tag { position:absolute; top:7px; left:7px; padding:3px 7px; border-radius:6px; font-size:.66rem; font-weight:900; letter-spacing:.08em; background:rgba(0,0,0,.65); color:#fff; }
+  .tag.live { background:var(--brand); color:var(--brand-fg); }
+  .acard-foot { display:flex; align-items:center; justify-content:space-between; gap:6px; padding:0 2px 2px; }
+  .acard-foot b { font-size:.86rem; }
+  .icon-btn { width:38px; height:38px; flex-shrink:0; border-radius:10px; border:0; background:rgba(255,255,255,.1); display:grid; place-items:center; cursor:pointer; color:var(--fg); }
+  .icon-btn svg { width:18px; height:18px; }
+
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  @media (min-width:640px) { .grid { grid-template-columns:repeat(4,1fr); gap:8px; } }
+  .tile { position:relative; aspect-ratio:1/1; border-radius:10px; overflow:hidden; border:0; padding:0; background:#000; cursor:pointer; display:block; width:100%; }
+  .tile img { width:100%; height:100%; object-fit:cover; display:block; transition:transform .15s ease; }
+  .tile .chk { position:absolute; top:6px; right:6px; width:24px; height:24px; border-radius:50%; border:2px solid #fff; background:rgba(0,0,0,.35); display:none; place-items:center; font-size:13px; font-weight:900; color:var(--brand-fg); }
+  .selecting .tile .chk { display:grid; }
+  .tile[aria-checked="true"] img { transform:scale(.88); border-radius:8px; }
+  .tile[aria-checked="true"] .chk { background:var(--brand); border-color:var(--brand); }
+  .skel { aspect-ratio:1/1; border-radius:10px; background:linear-gradient(100deg, rgba(255,255,255,.06) 30%, rgba(255,255,255,.13) 50%, rgba(255,255,255,.06) 70%); background-size:300% 100%; animation:shimmer 1.4s ease-in-out infinite; }
+  @keyframes shimmer { from { background-position:100% 0; } to { background-position:0 0; } }
+  .status { text-align:center; padding:28px 0 8px; color:var(--fg-2); font-size:.92rem; }
+  .gone { text-align:center; padding:60px 8px; color:#ffd0e0; font-weight:700; line-height:1.5; }
+
+  /* Contact */
+  .contact { margin-top:36px; padding:24px 0 8px; border-top:1px solid var(--line); display:grid; gap:12px; justify-items:center; text-align:center; }
+  .contact-logo { display:block; height:34px; width:auto; }
+  .contact p { margin:0; max-width:440px; font-size:.9rem; line-height:1.5; color:var(--fg-2); }
+  .contact p b { display:block; color:var(--fg); font-size:1.02rem; margin-bottom:2px; }
+  .contact .row { flex-wrap:wrap; justify-content:center; }
+  .wa { background:#25D366; color:#073B1C; }
+  .ig { background:linear-gradient(45deg,#F58529,#DD2A7B 55%,#8134AF); color:#fff; }
+  footer { text-align:center; padding:12px 0 22px; color:var(--fg-3); font-size:.76rem; }
+
+  /* Sticky save bar */
+  .dock { position:sticky; bottom:0; z-index:5; margin-top:8px; padding-top:14px; padding-bottom:calc(12px + env(safe-area-inset-bottom, 0px)); display:flex; gap:10px; align-items:center;
+    background:linear-gradient(0deg, var(--raised) 62%, rgb(var(--pbx-ui-raised-rgb) / 0)); }
+  .dock .count { flex:1; font-size:.9rem; font-weight:700; }
+  .dock .btn-primary { flex:1; }
+  .dock .count + .btn-primary { flex:0 0 auto; }
+  @media (min-width:960px) { .dock { max-width:420px; margin-left:auto; } }
+
+  /* Viewer */
+  .viewer { position:fixed; inset:0; z-index:50; background:#08030f; display:flex; flex-direction:column; }
+  .v-top { display:flex; align-items:center; justify-content:space-between; padding:calc(12px + env(safe-area-inset-top, 0px)) var(--gutter-r) 8px var(--gutter-l); }
+  .v-ctr { font-size:.88rem; font-weight:700; color:var(--fg-2); font-variant-numeric:tabular-nums; }
+  .v-stage { flex:1; min-height:0; position:relative; display:grid; place-items:center; overflow:hidden; touch-action:pan-y pinch-zoom; }
+  .v-stage img { max-width:calc(100% - 24px); max-height:100%; object-fit:contain; border-radius:6px; transition:transform .2s ease, opacity .2s ease; user-select:none; -webkit-user-drag:none; }
+  .v-nav { position:absolute; top:50%; transform:translateY(-50%); width:42px; height:42px; border-radius:50%; border:0; background:rgba(255,255,255,.12); cursor:pointer; display:grid; place-items:center; color:#fff; }
+  .v-nav svg { width:20px; height:20px; }
+  .v-prev { left:max(10px, env(safe-area-inset-left, 0px)); }
+  .v-next { right:max(10px, env(safe-area-inset-right, 0px)); }
+  .v-bot { padding:12px var(--gutter-r) calc(16px + env(safe-area-inset-bottom, 0px)) var(--gutter-l); display:grid; gap:10px; width:100%; max-width:520px; margin:0 auto; }
+  .v-name { text-align:center; font-size:.82rem; color:var(--fg-3); }
+  .dots { display:flex; justify-content:center; flex-wrap:wrap; gap:5px; }
+  .dots i { width:6px; height:6px; border-radius:3px; background:rgba(255,255,255,.25); transition:width .2s ease; }
+  .dots i.on { background:#fff; width:16px; }
+
+  /* Share fallback (link + QR) */
+  .modal { position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.6); display:flex; align-items:flex-end; justify-content:center; }
+  @media (min-width:640px) { .modal { align-items:center; } }
+  .sheet { width:100%; max-width:420px; background:#fff; color:var(--pbx-ink, #1b1424); border-radius:20px 20px 0 0; padding:22px var(--gutter-r) calc(20px + env(safe-area-inset-bottom, 0px)) var(--gutter-l); display:grid; gap:12px; justify-items:center; text-align:center; animation:up .22s ease; }
+  @media (min-width:640px) { .sheet { border-radius:20px; } }
+  @keyframes up { from { transform:translateY(30px); opacity:0; } }
+  .sheet h2 { margin:0; font-size:1.05rem; }
+  .sheet p { margin:0; font-size:.84rem; color:#5b5368; }
+  .sheet img { width:min(220px, 60vw); height:auto; border-radius:12px; }
+  .linkbox { width:100%; display:flex; gap:8px; align-items:center; background:#f1eef5; border-radius:12px; padding:6px 6px 6px 12px; }
+  .linkbox span { flex:1; min-width:0; font-size:.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; color:#3b3346; }
+  .linkbox .btn { min-height:36px; background:var(--brand); color:var(--brand-fg); flex:0 0 auto; }
+  .sheet .btn-close { width:100%; background:#f1eef5; color:#1b1424; }
+
+  .toast { position:fixed; left:50%; bottom:calc(88px + env(safe-area-inset-bottom, 0px)); transform:translateX(-50%); z-index:70; background:#fff; color:#1b1424; padding:11px 16px; border-radius:12px; font-size:.86rem; font-weight:700; box-shadow:0 10px 30px rgba(0,0,0,.4); max-width:calc(100% - 32px); display:flex; gap:10px; align-items:center; }
+  .toast button { border:0; background:var(--brand); color:var(--brand-fg); font-weight:800; border-radius:8px; padding:6px 10px; cursor:pointer; }
+
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation:none !important; transition:none !important; } }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header class="ghead">
-    <div class="ghead-left">
-      ${
-        params.qr
-          ? `<button class="gqr" id="qrBtn" type="button" title="Show QR code" aria-label="Show QR code"><img src="${params.qr}" alt="QR code"/></button>`
-          : `<div class="gqr ph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>`
-      }
-      <div class="gtitles">
-        <h1 class="gtitle">Hasil Foto Mu</h1>
-        <p class="gsub"><span id="tokenText"></span><span class="sep">&middot;</span><span id="timeText"></span></p>
-        <span class="gprint" id="printPill"></span>
-      </div>
-    </div>
+    ${kelanaLogo('brand-logo')}
+    <h1 class="gtitle">Hasil fotomu sudah siap</h1>
+    <p class="gsub" id="timeText"></p>
+    <span class="gprint" id="printPill" role="status"></span>
   </header>
   <div id="note"></div>
-  <div id="content"><div class="status pulse">Loading your memories&hellip;</div></div>
+  <main id="content"><div class="status">Memuat fotomu&hellip;</div></main>
   <section class="contact" aria-label="Kontak Kelana">
     ${KELANA_LOGO_SVG}
-    <h2>Suka hasil fotonya?</h2>
-    <p>Bikin acaramu makin seru dengan photobooth Kelana: pernikahan, ulang tahun, wisuda, sampai gathering kantor. Yuk ngobrol dulu!</p>
-    <div class="contact-actions">
-      <a class="contact-btn contact-wa" href="${KELANA_WHATSAPP}" target="_blank" rel="noopener">
-        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8-.2-.1-.4-.1-.6.1l-.8 1c-.1.2-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.4.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.7 11.8 11.8 0 0 0 4.5 4c1.7.7 2.4.8 3.2.7.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.2-1.2-.1-.1-.3-.2-.5-.3Z"/></svg>
+    <p><b>Suka hasil fotonya?</b>Bikin acaramu makin seru dengan photobooth Kelana: pernikahan, ulang tahun, wisuda, sampai gathering kantor.</p>
+    <div class="row">
+      <a class="btn btn-sm wa" href="${KELANA_WHATSAPP}" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2Z"/></svg>
         Chat via WhatsApp
       </a>
-      <a class="contact-btn contact-ig" href="${KELANA_INSTAGRAM}" target="_blank" rel="noopener">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg>
+      <a class="btn btn-sm ig" href="${KELANA_INSTAGRAM}" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor"/></svg>
         @kelanacirebon_
       </a>
     </div>
   </section>
   <footer>Kelana Photobooth &middot; Cirebon</footer>
-</div>
-<div class="viewer hidden" id="viewer" role="dialog" aria-modal="true" aria-label="Enlarged photo">
-  <img id="viewerImg" src="" alt="Enlarged photo"/>
-  <button class="viewer-close" id="viewerClose" type="button" aria-label="Close viewer">&#10005;</button>
-  <div class="viewer-bar">
-    <span class="name" id="viewerName"></span>
-    <a class="btn" id="viewerDl" href="#" download>Download</a>
-  </div>
-</div>
-<div class="qrmodal" id="qrmodal" role="dialog" aria-modal="true" aria-label="QR code">
-  <div class="qrmodal-box" id="qrmodalBox">
-    <h2>Scan untuk unduh</h2>
-    <img id="qrFull" src="" alt="Large QR code"/>
-    <p id="qrUrl"></p>
-    <button class="btn" id="qrClose" type="button">Tutup</button>
-  </div>
+  <div class="dock hidden" id="dock"></div>
 </div>
 <script>
 const TOKEN = ${tokenJson};
 const CREATED_AT = ${createdAtJson};
 const QR = ${qrJson};
+const RETENTION_DAYS = ${RETENTION_DAYS};
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
 
-const store = { files: [], photos: [] };
+// Phones save through the share sheet ("Simpan gambar" lands in the photo
+// library); desktops download files instead.
+const IS_TOUCH = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+
+const ICON = {
+  dl: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>',
+  share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v13"/><path d="m7 8 5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  l: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 5-7 7 7 7"/></svg>',
+  r: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>'
+};
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+const store = { files: [], photos: [], framed: null, live: null, gif: null, viewItems: [] };
+const ui = { selecting: false, selected: new Set(), noteError: null, viewIndex: -1 };
 
 // Booth progress signals. print-request/print-result.json carry the timed
 // flow's "customer arranged, booth is generating outputs" lifecycle; upload
@@ -227,26 +256,27 @@ const store = { files: [], photos: [] };
 const CONTROL = { printRequest: null, printResult: null };
 let changeCount = 0;
 let lastChangeAt = 0;
+let lastFiles = [];
 
-// The banner above the grid carries two independent messages: the booth's
-// "still generating" state (driven by render()) and a download failure. The
-// 5s poll re-renders whenever the file list changes, so a download error has
-// to be parked here or it would be wiped mid-build.
-let noteError = null;
-
-function setNote(html, isError) {
-  const box = document.getElementById('note');
-  if (!box) return;
-  if (html) {
-    noteError = isError ? html : null;
-    box.innerHTML = html;
-  } else {
-    noteError = null;
-    box.innerHTML = '';
-  }
+function esc(value) {
+  return String(value).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
 }
 
-const ERR_DOWNLOAD = '<div class="note err">Those files could not be downloaded. Please ask the booth attendant.</div>';
+function formatDate(ts, withTime) {
+  const d = new Date(ts);
+  let out = d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getFullYear();
+  if (withTime) out += ', ' + String(d.getHours()).padStart(2, '0') + '.' + String(d.getMinutes()).padStart(2, '0');
+  return out;
+}
+
+function expiryText() {
+  if (CREATED_AT) {
+    return 'Foto disimpan ' + RETENTION_DAYS + ' hari, sampai <b>' + formatDate(CREATED_AT + RETENTION_DAYS * 86400000, false) + '</b>. Simpan sekarang supaya tidak hilang.';
+  }
+  return 'Foto hanya disimpan <b>' + RETENTION_DAYS + ' hari</b>. Simpan sekarang supaya tidak hilang.';
+}
 
 function fetchJson(name) {
   return fetch(location.origin + '/d/' + TOKEN + '/' + name + '?ts=' + Date.now())
@@ -254,17 +284,34 @@ function fetchJson(name) {
     .catch(function () { return null; });
 }
 
-function formatTime(ts) {
-  if (!ts) return '';
-  const d = new Date(ts);
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = d.getFullYear();
-  const hour = String(d.getHours()).padStart(2, '0');
-  const minute = String(d.getMinutes()).padStart(2, '0');
-  return day + '/' + month + '/' + year + ' ' + hour + ':' + minute;
+// ---------------------------------------------------------------------------
+// Toast
+// ---------------------------------------------------------------------------
+let toastTimer = null;
+function toast(message, action) {
+  const old = document.querySelector('.toast');
+  if (old) old.remove();
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.setAttribute('role', 'status');
+  const text = document.createElement('span');
+  text.textContent = message;
+  el.appendChild(text);
+  if (action) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = action.label;
+    btn.addEventListener('click', function () { el.remove(); action.run(); });
+    el.appendChild(btn);
+  }
+  document.body.appendChild(el);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { el.remove(); }, action ? 8000 : 2600);
 }
 
+// ---------------------------------------------------------------------------
+// Saving: share sheet on phones, download / ZIP on desktop
+// ---------------------------------------------------------------------------
 function downloadUrl(url, name) {
   const a = document.createElement('a');
   a.href = url;
@@ -274,14 +321,26 @@ function downloadUrl(url, name) {
   a.remove();
 }
 
-const EYE_SVG = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg>';
-const ICON_IMAGE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>';
-const ICON_GIF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7.5 10h1.5v4H7.5z"/><path d="M11 10v4"/><path d="M11 12h2.5"/></svg>';
+// Every file is fetched at most once per page view (share + ZIP reuse it).
+const blobCache = new Map();
+function fetchBlob(item) {
+  if (!blobCache.has(item.url)) {
+    blobCache.set(item.url, fetch(item.url).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.blob();
+    }).catch(function (error) { blobCache.delete(item.url); throw error; }));
+  }
+  return blobCache.get(item.url);
+}
+
+function mimeFor(name, blob) {
+  if (/[.]gif$/i.test(name)) return 'image/gif';
+  if (/[.]png$/i.test(name)) return blob.type && blob.type !== 'application/octet-stream' ? blob.type : 'image/png';
+  return 'image/jpeg';
+}
 
 // Browsers only honor a handful of programmatic downloads per user gesture, so
-// firing one anchor per output silently drops all but the last file. Instead the
-// gallery fetches every selected output once and hands back a single .zip blob,
-// which also gives the customer one clean file instead of a burst of downloads.
+// several files are packed into one .zip instead of a burst of downloads.
 //
 // ZIP entries are written with the STORE method (no deflate): every output is
 // already a compressed format (JPEG/PNG/GIF), so deflating would burn CPU for
@@ -378,197 +437,272 @@ function buildZip(entries) {
   return new Blob(parts.concat(centrals, [end]), { type: 'application/zip' });
 }
 
-// A single output still downloads directly; two or more are zipped. zipName is
-// the archive filename (the token keeps each session's file distinct).
-async function downloadMany(items, btnId, zipName) {
-  const btn = document.getElementById(btnId);
-  if (!btn || items.length === 0) return;
+function setBusy(btn, label) {
+  if (!btn) return function () {};
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = label;
+  return function () { btn.innerHTML = original; btn.disabled = false; };
+}
+
+function showDownloadError() {
+  ui.noteError = '<div class="note err">Foto belum bisa disimpan. Cek koneksi internetmu lalu coba lagi, atau minta bantuan petugas booth.</div>';
+  renderNote();
+}
+
+async function shareFiles(files) {
+  try {
+    await navigator.share({ files: files });
+    return 'ok';
+  } catch (error) {
+    if (error && error.name === 'AbortError') return 'cancelled';
+    // Fetching took long enough that the tap no longer counts as the user's
+    // gesture: the files are ready now, so one more tap opens the sheet.
+    if (error && error.name === 'NotAllowedError') return 'gesture';
+    return 'failed';
+  }
+}
+
+async function saveItems(items, btn, zipName) {
+  if (!items.length) return;
+  ui.noteError = null;
+  renderNote();
+
+  if (IS_TOUCH && navigator.canShare) {
+    const restore = setBusy(btn, 'Menyiapkan…');
+    let files;
+    try {
+      const blobs = await Promise.all(items.map(fetchBlob));
+      files = blobs.map(function (blob, i) {
+        return new File([blob], items[i].name, { type: mimeFor(items[i].name, blob) });
+      });
+    } catch (error) {
+      restore();
+      showDownloadError();
+      return;
+    }
+    restore();
+    if (navigator.canShare({ files: files })) {
+      const result = await shareFiles(files);
+      if (result === 'gesture') {
+        toast(files.length > 1 ? files.length + ' file siap disimpan' : 'Foto siap disimpan', {
+          label: 'Simpan',
+          run: function () { shareFiles(files); },
+        });
+      }
+      if (result !== 'failed') return;
+    }
+  }
+
   if (items.length === 1) {
     downloadUrl(items[0].url, items[0].name);
     return;
   }
-  const original = btn.textContent;
-  btn.disabled = true;
+  const restore = setBusy(btn, 'Menyiapkan 0 / ' + items.length);
   try {
     const entries = [];
     for (let i = 0; i < items.length; i++) {
-      btn.textContent = 'Packing ' + (i + 1) + ' / ' + items.length;
-      let response;
+      if (btn) btn.textContent = 'Menyiapkan ' + (i + 1) + ' / ' + items.length;
       try {
-        response = await fetch(items[i].url);
+        entries.push({ name: items[i].name, bytes: new Uint8Array(await (await fetchBlob(items[i])).arrayBuffer()) });
       } catch (error) {
-        continue;
+        // Skip a file that will not load; the rest still downloads.
       }
-      if (!response.ok) continue;
-      entries.push({ name: items[i].name, bytes: new Uint8Array(await response.arrayBuffer()) });
     }
     if (entries.length === 0) {
-      setNote(ERR_DOWNLOAD, true);
+      showDownloadError();
       return;
     }
-    btn.textContent = 'Building ZIP&hellip;';
     const href = URL.createObjectURL(buildZip(entries));
     downloadUrl(href, zipName);
     // Give the browser time to start the download before dropping the blob.
     setTimeout(function () { URL.revokeObjectURL(href); }, 60000);
   } catch (error) {
-    setNote(ERR_DOWNLOAD, true);
+    showDownloadError();
   } finally {
-    btn.textContent = original;
-    btn.disabled = false;
+    restore();
   }
 }
 
-function tileHtml(item, i) {
-  return '<div class="tile" data-i="' + i + '" role="button" tabindex="0" aria-checked="false" aria-label="Select photo ' + (i + 1) + '">' +
-    '<span class="badge">&#10003;</span>' +
-    '<button class="eye" type="button" data-url="' + item.url + '" data-name="' + item.name + '" title="View larger" aria-label="View photo ' + (i + 1) + ' larger">' + EYE_SVG + '</button>' +
-    '<img src="' + item.url + '" alt="Photo ' + (i + 1) + '" loading="lazy"/>' +
+function allItems() {
+  return [store.framed, store.live, store.gif].filter(Boolean).concat(store.photos);
+}
+
+function saveKey(key, btn) {
+  if (key === 'framed' && store.framed) return saveItems([store.framed], btn);
+  if (key === 'live' && store.live) return saveItems([store.live], btn);
+  if (key === 'gif' && store.gif) return saveItems([store.gif], btn);
+  if (key === 'current') {
+    const item = store.viewItems[ui.viewIndex];
+    if (item) saveItems([item], btn);
+    return;
+  }
+  if (key === 'selected') {
+    const items = store.photos.filter(function (p) { return ui.selected.has(p.name); });
+    return saveItems(items, btn, 'foto-pilihan-' + TOKEN + '.zip');
+  }
+  if (key === 'all') return saveItems(allItems(), btn, 'kelana-' + TOKEN + '.zip');
+}
+
+// ---------------------------------------------------------------------------
+// Share the gallery link (native sheet, else link + QR)
+// ---------------------------------------------------------------------------
+async function shareLink() {
+  const url = location.origin + location.pathname;
+  if (IS_TOUCH && navigator.share) {
+    try {
+      await navigator.share({ title: 'Hasil foto photobooth Kelana', url: url });
+      return;
+    } catch (error) {
+      if (error && error.name === 'AbortError') return;
+    }
+  }
+  openLinkSheet(url);
+}
+
+function openLinkSheet(url) {
+  closeLinkSheet();
+  const modal = document.createElement('div');
+  modal.className = 'modal';
+  modal.id = 'linkSheet';
+  modal.innerHTML =
+    '<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="linkTitle">' +
+      '<h2 id="linkTitle">Bagikan galeri ini</h2>' +
+      '<p>Teman bisa scan QR ini atau buka link-nya.</p>' +
+      (QR ? '<img src="' + QR + '" alt="QR galeri"/>' : '') +
+      '<div class="linkbox"><span id="linkText"></span><button class="btn" type="button" id="copyLink">Salin</button></div>' +
+      '<button class="btn btn-close" type="button" id="closeLink">Tutup</button>' +
     '</div>';
-}
-
-// Framed output card (mirrors the admin results modal's ResultLink).
-function resCard(icon, title, url, alt, label, square) {
-  return '<div class="card">' +
-    '<h4>' + icon + title + '</h4>' +
-    '<button type="button" class="res' + (square ? ' sq' : '') + '" data-url="' + url + '" data-name="' + label + '" title="View larger">' +
-      '<img src="' + url + '" alt="' + alt + '"/>' +
-      '<span class="cap">' + icon + label + '</span>' +
-    '</button>' +
-  '</div>';
-}
-
-function syncActions() {
-  const tiles = document.querySelectorAll('.tile.sel');
-  const btnSel = document.getElementById('dlSelected');
-  const btnAll = document.getElementById('selAll');
-  const cnt = document.getElementById('selCount');
-  if (btnSel) {
-    btnSel.classList.toggle('hidden', tiles.length === 0);
-    // More than one file is delivered as a single .zip rather than a burst of
-    // separate downloads, so say so on the button itself.
-    btnSel.textContent = 'Download selected (' + tiles.length + ')' + (tiles.length > 1 ? ' ZIP' : '');
-  }
-  if (btnAll) {
-    const all = store.photos.length > 0 && tiles.length === store.photos.length;
-    btnAll.textContent = all ? 'Clear all' : 'Select all';
-  }
-  if (cnt) cnt.textContent = tiles.length + ' / ' + store.photos.length + ' selected';
-}
-
-function toggleSel(i) {
-  const tile = document.querySelectorAll('.tile')[i];
-  if (!tile) return;
-  tile.classList.toggle('sel');
-  tile.setAttribute('aria-checked', tile.classList.contains('sel') ? 'true' : 'false');
-  syncActions();
-}
-
-function selectAllToggle() {
-  const tiles = document.querySelectorAll('.tile');
-  const any = document.querySelectorAll('.tile:not(.sel)').length > 0;
-  tiles.forEach(function (t) {
-    t.classList.toggle('sel', any);
-    t.setAttribute('aria-checked', any ? 'true' : 'false');
+  document.body.appendChild(modal);
+  modal.querySelector('#linkText').textContent = url;
+  modal.addEventListener('click', function (e) { if (e.target === modal) closeLinkSheet(); });
+  modal.querySelector('#closeLink').addEventListener('click', closeLinkSheet);
+  modal.querySelector('#copyLink').addEventListener('click', function () {
+    const done = function () { toast('Link disalin'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(done).catch(function () { selectLinkText(); });
+    } else {
+      selectLinkText();
+    }
   });
-  syncActions();
+  modal.querySelector('#copyLink').focus();
 }
 
-  function downloadAllPhotos() {
-  downloadMany(store.photos, 'dlAllPhotos', 'photos-' + TOKEN + '.zip');
+function selectLinkText() {
+  const el = document.getElementById('linkText');
+  if (!el) return;
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  toast('Tekan lama untuk menyalin link');
 }
 
-function downloadAllOutputs() {
-  downloadMany(store.files, 'dlAllOutputs', 'photo-booth-' + TOKEN + '.zip');
+function closeLinkSheet() {
+  const old = document.getElementById('linkSheet');
+  if (old) old.remove();
 }
 
-function downloadSelected() {
-  const items = [];
-  document.querySelectorAll('.tile.sel').forEach(function (t) {
-    const item = store.photos[Number(t.dataset.i)];
-    if (item) items.push(item);
+// ---------------------------------------------------------------------------
+// Viewer (swipe / arrows / keyboard)
+// ---------------------------------------------------------------------------
+let viewerEl = null;
+let lastFocus = null;
+
+function openViewer(index) {
+  if (!store.viewItems.length) return;
+  closeViewer();
+  lastFocus = document.activeElement;
+  ui.viewIndex = index;
+  viewerEl = document.createElement('div');
+  viewerEl.className = 'viewer';
+  viewerEl.setAttribute('role', 'dialog');
+  viewerEl.setAttribute('aria-modal', 'true');
+  viewerEl.setAttribute('aria-label', 'Lihat foto');
+  const many = store.viewItems.length > 1;
+  viewerEl.innerHTML =
+    '<div class="v-top"><span class="v-ctr" id="vCtr"></span><button class="icon-btn" type="button" id="vClose" aria-label="Tutup">' + ICON.x + '</button></div>' +
+    '<div class="v-stage" id="vStage"><img id="vImg" alt=""/>' +
+      (many ? '<button class="v-nav v-prev" type="button" id="vPrev" aria-label="Sebelumnya">' + ICON.l + '</button>' +
+              '<button class="v-nav v-next" type="button" id="vNext" aria-label="Berikutnya">' + ICON.r + '</button>' : '') +
+    '</div>' +
+    '<div class="v-bot">' + (many ? '<div class="dots" id="vDots" aria-hidden="true"></div>' : '') +
+      '<div class="v-name" id="vName"></div>' +
+      '<div class="row"><button class="btn btn-primary" type="button" id="vSave">' + ICON.dl + 'Simpan</button></div>' +
+    '</div>';
+  document.body.appendChild(viewerEl);
+  document.body.style.overflow = 'hidden';
+
+  const stage = viewerEl.querySelector('#vStage');
+  let x0 = null;
+  let y0 = null;
+  stage.addEventListener('touchstart', function (e) {
+    if (e.touches.length !== 1) { x0 = null; return; }
+    x0 = e.touches[0].clientX;
+    y0 = e.touches[0].clientY;
+  }, { passive: true });
+  stage.addEventListener('touchend', function (e) {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0;
+    const dy = e.changedTouches[0].clientY - y0;
+    x0 = null;
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) stepViewer(dx < 0 ? 1 : -1);
   });
-  downloadMany(items, 'dlSelected', 'selected-' + TOKEN + '.zip');
+  viewerEl.querySelector('#vClose').addEventListener('click', closeViewer);
+  viewerEl.querySelector('#vSave').addEventListener('click', function (e) { saveKey('current', e.currentTarget); });
+  if (many) {
+    viewerEl.querySelector('#vPrev').addEventListener('click', function () { stepViewer(-1); });
+    viewerEl.querySelector('#vNext').addEventListener('click', function () { stepViewer(1); });
+  }
+  showViewerItem(0);
+  viewerEl.querySelector('#vClose').focus();
+}
+
+function showViewerItem(dir) {
+  if (!viewerEl) return;
+  const item = store.viewItems[ui.viewIndex];
+  if (!item) return;
+  const img = viewerEl.querySelector('#vImg');
+  const apply = function () {
+    img.src = item.url;
+    img.alt = item.label;
+    img.style.opacity = '1';
+    img.style.transform = 'none';
+  };
+  if (dir) {
+    img.style.opacity = '0';
+    img.style.transform = 'translateX(' + (dir * 30) + 'px)';
+    setTimeout(apply, 120);
+  } else {
+    apply();
+  }
+  viewerEl.querySelector('#vCtr').textContent = (ui.viewIndex + 1) + ' / ' + store.viewItems.length;
+  viewerEl.querySelector('#vName').textContent = item.label;
+  const dots = viewerEl.querySelector('#vDots');
+  if (dots) {
+    dots.innerHTML = store.viewItems.map(function (_, i) { return '<i' + (i === ui.viewIndex ? ' class="on"' : '') + '></i>'; }).join('');
+  }
+}
+
+function stepViewer(delta) {
+  const n = store.viewItems.length;
+  if (n < 2) return;
+  ui.viewIndex = (ui.viewIndex + delta + n) % n;
+  showViewerItem(delta);
 }
 
 function closeViewer() {
-  document.getElementById('viewer').classList.add('hidden');
+  if (!viewerEl) return;
+  viewerEl.remove();
+  viewerEl = null;
+  document.body.style.overflow = '';
+  if (lastFocus && lastFocus.focus) lastFocus.focus();
 }
 
-function openViewer(url, name) {
-  const img = document.getElementById('viewerImg');
-  img.src = url;
-  // Raw captured photos stay square; framed/GIF results keep their rounding.
-  img.classList.toggle('square', /photo-[0-9]+[.](jpe?g|png)$/i.test(name));
-  document.getElementById('viewerName').textContent = name;
-  const dl = document.getElementById('viewerDl');
-  dl.href = url;
-  dl.setAttribute('download', name);
-  document.getElementById('viewer').classList.remove('hidden');
-}
-
-// The viewer + QR modal are static markup — wire their listeners once at
-// startup so the polling re-renders below never stack duplicate listeners.
-document.getElementById('viewer').addEventListener('click', function (e) {
-  if (e.target.id === 'viewer') closeViewer();
-});
-document.getElementById('viewerClose').addEventListener('click', closeViewer);
-document.addEventListener('keydown', function (e) {
-  if (e.key === 'Escape') {
-    closeViewer();
-    document.getElementById('qrmodal').classList.remove('open');
-  }
-});
-const qrBtn = document.getElementById('qrBtn');
-if (qrBtn) {
-  qrBtn.addEventListener('click', function () {
-    if (!QR) return;
-    document.getElementById('qrFull').src = QR;
-    document.getElementById('qrUrl').textContent = location.href;
-    document.getElementById('qrmodal').classList.add('open');
-  });
-}
-document.getElementById('qrmodal').addEventListener('click', function (e) {
-  if (e.target.id === 'qrmodal') document.getElementById('qrmodal').classList.remove('open');
-});
-document.getElementById('qrClose').addEventListener('click', function () {
-  document.getElementById('qrmodal').classList.remove('open');
-});
-
-function wireViewer() {
-  document.querySelectorAll('.res, .eye').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      openViewer(btn.dataset.url, btn.dataset.name);
-    });
-  });
-}
-
-function wireActions() {
-  document.getElementById('selAll').addEventListener('click', selectAllToggle);
-  document.getElementById('dlAllPhotos').addEventListener('click', downloadAllPhotos);
-  document.getElementById('dlAllOutputs').addEventListener('click', downloadAllOutputs);
-  document.getElementById('dlSelected').addEventListener('click', downloadSelected);
-  document.querySelectorAll('.tile').forEach(function (t, i) {
-    t.addEventListener('click', function (e) {
-      if (e.target.closest('.eye')) return;
-      toggleSel(i);
-    });
-    t.addEventListener('keydown', function (e) {
-      if (e.target.closest('.eye')) return;
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        toggleSel(i);
-      }
-    });
-  });
-  syncActions();
-}
-
-// Live-populating gallery: the timed flow sends the customer straight here
-// after arranging, while the booth may still be uploading outputs — keep
-// polling so new files (framed.png, GIFs, ...) appear without a refresh.
-const POLL_MS = 5000;
-let lastKey = '';
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
 
 /**
  * Whether the session is still producing outputs. Timed flow is driven by
@@ -579,7 +713,7 @@ let lastKey = '';
  */
 function pendingNote(files) {
   if (files.length === 0) return null;
-  var names = files.map(function (f) { return f.name; });
+  const names = files.map(function (f) { return f.name; });
   if (CONTROL.printResult) {
     if (CONTROL.printResult.status === 'ok') return null;
     if (CONTROL.printResult.status === 'error') return 'error';
@@ -594,132 +728,252 @@ function pendingNote(files) {
   return null;
 }
 
-function render(files) {
-  const root = document.getElementById('content');
-  const noteBox = document.getElementById('note');
-  if (files.length === 0) {
-    noteBox.innerHTML = '';
-    root.innerHTML =
-      '<div class="status pulse">Your photos are uploading &mdash; check back in a moment&hellip;</div>';
+function renderNote() {
+  const box = document.getElementById('note');
+  if (!box) return;
+  if (ui.noteError) {
+    box.innerHTML = ui.noteError;
     return;
   }
+  const state = pendingNote(lastFiles);
+  if (state === 'busy') {
+    box.innerHTML = '<div class="note" role="status"><span class="spin" aria-hidden="true"></span>Sebagian hasil masih dibuat. Halaman ini akan terisi sendiri, tidak perlu di-refresh.</div>';
+  } else if (state === 'error') {
+    box.innerHTML = '<div class="note err">Sebagian hasil gagal dibuat. Minta bantuan petugas booth ya.</div>';
+  } else {
+    box.innerHTML = '';
+  }
+}
 
+function classify(files) {
   store.files = files.filter(function (f) {
     return !/^(meta|organize|print-request|print-result|live-clips)[.]json$/i.test(f.name);
   });
-
-  const framed = store.files.filter(function (f) { return /framed[.]png$/i.test(f.name); });
-  const liveGif = store.files.filter(function (f) { return /result-live[.]gif$/i.test(f.name); });
-  const gif = store.files.filter(function (f) {
-    return /[.]gif$/i.test(f.name) && !/result-live[.]gif$/i.test(f.name);
+  store.framed = null;
+  store.live = null;
+  store.gif = null;
+  store.photos = [];
+  store.files.forEach(function (f) {
+    if (/framed[.]png$/i.test(f.name)) store.framed = { url: f.url, name: f.name, label: 'Foto dengan bingkai' };
+    else if (/result-live[.]gif$/i.test(f.name)) store.live = { url: f.url, name: f.name, label: 'Live photo' };
+    else if (/[.]gif$/i.test(f.name)) { if (!store.gif) store.gif = { url: f.url, name: f.name, label: 'GIF' }; }
+    else if (/[.](jpe?g|png)$/i.test(f.name)) store.photos.push({ url: f.url, name: f.name, label: '' });
   });
-  store.photos = store.files.filter(function (f) {
-    return /[.](jpe?g|png)$/i.test(f.name) && !/framed[.]png$/i.test(f.name);
+  store.photos.forEach(function (p, i) { p.label = 'Foto ' + (i + 1); });
+  store.viewItems = allItems();
+  // Drop selections whose photo no longer exists.
+  ui.selected.forEach(function (name) {
+    if (!store.photos.some(function (p) { return p.name === name; })) ui.selected.delete(name);
   });
-
-  const note = pendingNote(files);
-  if (noteError) {
-    noteBox.innerHTML = noteError;
-  } else if (note === 'busy') {
-    noteBox.innerHTML =
-      '<div class="note"><span class="spin"></span> Some outputs are still being generated &amp; uploaded &mdash; your photos are already here, more coming&hellip;</div>';
-  } else if (note === 'error') {
-    noteBox.innerHTML =
-      '<div class="note err">Some outputs could not be generated. Please ask the booth attendant.</div>';
-  } else {
-    noteBox.innerHTML = '';
-  }
-
-  let side = '';
-  if (framed.length) {
-    side += resCard(ICON_IMAGE, 'Framed photo', framed[0].url, 'Framed photo', 'Framed', true);
-  }
-  if (liveGif.length) {
-    side += resCard(ICON_GIF, 'Framed live photo', liveGif[0].url, 'Framed live version', 'Live', true);
-  }
-  if (gif.length) {
-    side += resCard(ICON_GIF, 'Animated GIF', gif[0].url, 'Animated version', 'GIF', true);
-  }
-
-  let html = '<div class="grid3">';
-  if (side) {
-    html += '<div class="col-side">' + side + '</div>';
-  }
-  if (store.photos.length) {
-    html += '<div class="col-main">' +
-      '<div class="ph-head">' +
-        '<h4>' + ICON_IMAGE + ' Photos (' + store.photos.length + ')</h4>' +
-        '<span class="hint">Tap a photo to select, then download.</span>' +
-      '</div>' +
-      '<div class="pgrid">' + store.photos.map(tileHtml).join('') + '</div>' +
-      '<div class="actions">' +
-        '<button class="btn sm ghost" id="selAll" type="button">Select all</button>' +
-        '<button class="btn sm hidden" id="dlSelected" type="button">Download selected</button>' +
-        '<button class="btn sm" id="dlAllPhotos" type="button">Download all photos (ZIP)</button>' +
-        '<button class="btn sm ghost" id="dlAllOutputs" type="button">Download all results (ZIP)</button>' +
-        '<span class="count" id="selCount">0 / ' + store.photos.length + ' selected</span>' +
-      '</div>' +
-    '</div>';
-  }
-  html += '</div>';
-  root.innerHTML = html;
-  wireViewer();
-  if (store.photos.length) wireActions();
 }
 
-function initHead() {
-  document.getElementById('tokenText').textContent = TOKEN;
-  document.getElementById('timeText').textContent = formatTime(CREATED_AT);
+function viewIndexOf(item) {
+  return store.viewItems.indexOf(item);
 }
 
-async function main() {
+function render(files) {
   const root = document.getElementById('content');
-  let res;
-  try {
-    res = await fetch('/api/sessions/' + TOKEN);
-  } catch (_e) {
-    // Transient network blip — keep polling instead of giving up.
-    setTimeout(main, POLL_MS);
+  lastFiles = files;
+  renderNote();
+
+  if (files.length === 0) {
+    root.innerHTML =
+      '<div class="hero"><div class="skel hero-skel"></div></div>' +
+      '<div class="status">Fotomu sedang diunggah. Halaman ini akan terisi sendiri.</div>';
+    renderDock();
     return;
   }
+
+  classify(files);
+  const busy = pendingNote(files) === 'busy';
+  let html = '<div class="layout"><div class="col-a">';
+
+  // Hero: the framed print.
+  if (store.framed || busy) {
+    html += '<section class="hero" aria-label="Foto utama">';
+    if (store.framed) {
+      html += '<button class="hero-img" type="button" data-open="' + viewIndexOf(store.framed) + '" aria-label="Lihat foto dengan bingkai">' +
+        '<img src="' + esc(store.framed.url) + '" alt="Foto dengan bingkai"/></button>';
+    } else {
+      html += '<div class="skel hero-skel" aria-hidden="true"></div>';
+    }
+    html += '<div class="row">' +
+        '<button class="btn btn-primary" type="button" data-save="framed"' + (store.framed ? '' : ' disabled') + '>' + ICON.dl + 'Simpan foto</button>' +
+        '<button class="btn btn-ghost" type="button" data-sharelink aria-label="Bagikan link galeri">' + ICON.share + 'Bagikan</button>' +
+      '</div>' +
+      '<p class="expiry">' + expiryText() + '</p>' +
+    '</section>';
+  } else {
+    html += '<section class="hero" aria-label="Info">' +
+      '<div class="row"><button class="btn btn-ghost" type="button" data-sharelink style="flex:1">' + ICON.share + 'Bagikan galeri</button></div>' +
+      '<p class="expiry">' + expiryText() + '</p></section>';
+  }
+
+  // Animated versions.
+  const anim = [];
+  if (store.live) anim.push({ item: store.live, key: 'live', tag: '<span class="tag live">LIVE</span>' });
+  if (store.gif) anim.push({ item: store.gif, key: 'gif', tag: '<span class="tag">GIF</span>' });
+  if (anim.length || busy) {
+    html += '<section class="sec" aria-label="Versi bergerak"><div class="sec-head"><h2>Versi bergerak</h2></div><div class="anim">';
+    anim.forEach(function (a) {
+      html += '<div class="acard">' +
+        '<button class="thumb" type="button" data-open="' + viewIndexOf(a.item) + '" aria-label="Lihat ' + esc(a.item.label) + '">' +
+          '<img src="' + esc(a.item.url) + '" alt="' + esc(a.item.label) + '" loading="lazy"/>' + a.tag + '</button>' +
+        '<div class="acard-foot"><b>' + esc(a.item.label) + '</b>' +
+          '<button class="icon-btn" type="button" data-save="' + a.key + '" aria-label="Simpan ' + esc(a.item.label) + '">' + ICON.dl + '</button></div>' +
+      '</div>';
+    });
+    if (busy) {
+      for (let i = anim.length; i < 2; i++) html += '<div class="acard"><div class="skel" aria-hidden="true"></div><div class="acard-foot"><b style="color:var(--fg-3)">Sedang dibuat…</b></div></div>';
+    }
+    html += '</div></section>';
+  }
+  html += '</div><div class="col-b">';
+
+  // Raw photos.
+  if (store.photos.length) {
+    html += '<section class="sec' + (ui.selecting ? ' selecting' : '') + '" aria-label="Semua foto">' +
+      '<div class="sec-head"><h2>Semua foto<span>' + store.photos.length + '</span></h2>' +
+        '<button class="btn btn-ghost btn-sm" type="button" id="selToggle">' + (ui.selecting ? 'Batal' : 'Pilih') + '</button></div>' +
+      '<div class="grid">';
+    store.photos.forEach(function (p, i) {
+      const checked = ui.selected.has(p.name);
+      html += '<button class="tile" type="button" data-tile="' + i + '"' +
+        (ui.selecting ? ' role="checkbox" aria-checked="' + checked + '"' : '') +
+        ' aria-label="' + esc(p.label) + '">' +
+        '<img src="' + esc(p.url) + '" alt="" loading="lazy"/><span class="chk" aria-hidden="true">&#10003;</span></button>';
+    });
+    html += '</div></section>';
+  }
+  html += '</div></div>';
+  root.innerHTML = html;
+  renderDock();
+}
+
+function renderDock() {
+  const dock = document.getElementById('dock');
+  const total = allItems().length;
+  if (ui.selecting) {
+    const n = ui.selected.size;
+    dock.innerHTML = '<span class="count">' + n + ' dipilih</span>' +
+      '<button class="btn btn-primary" type="button" data-save="selected"' + (n ? '' : ' disabled') + '>' + ICON.dl + 'Simpan' + (n ? ' ' + n : '') + '</button>';
+    dock.classList.remove('hidden');
+  } else if (total > 1) {
+    dock.innerHTML = '<button class="btn btn-primary" type="button" data-save="all">' + ICON.dl + 'Simpan semua &middot; ' + total + ' file</button>';
+    dock.classList.remove('hidden');
+  } else {
+    dock.innerHTML = '';
+    dock.classList.add('hidden');
+  }
+}
+
+function toggleTile(i) {
+  const photo = store.photos[i];
+  if (!photo) return;
+  if (ui.selected.has(photo.name)) ui.selected.delete(photo.name);
+  else ui.selected.add(photo.name);
+  const tile = document.querySelector('[data-tile="' + i + '"]');
+  if (tile) tile.setAttribute('aria-checked', ui.selected.has(photo.name) ? 'true' : 'false');
+  renderDock();
+}
+
+function setSelecting(on) {
+  ui.selecting = on;
+  ui.selected.clear();
+  render(lastFiles);
+  const btn = document.getElementById('selToggle');
+  if (btn) btn.focus();
+}
+
+// One delegated listener: the polling re-renders never stack handlers.
+document.addEventListener('click', function (e) {
+  let t;
+  if ((t = e.target.closest('[data-open]'))) { openViewer(Number(t.dataset.open)); return; }
+  if ((t = e.target.closest('[data-tile]'))) {
+    const i = Number(t.dataset.tile);
+    if (ui.selecting) toggleTile(i);
+    else openViewer(viewIndexOf(store.photos[i]));
+    return;
+  }
+  if (e.target.closest('#selToggle')) { setSelecting(!ui.selecting); return; }
+  if ((t = e.target.closest('[data-save]'))) {
+    if (!t.disabled) saveKey(t.dataset.save, t);
+    return;
+  }
+  if (e.target.closest('[data-sharelink]')) { shareLink(); return; }
+});
+
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') {
+    if (document.getElementById('linkSheet')) closeLinkSheet();
+    else closeViewer();
+  }
+  if (viewerEl && e.key === 'ArrowRight') stepViewer(1);
+  if (viewerEl && e.key === 'ArrowLeft') stepViewer(-1);
+});
+
+// ---------------------------------------------------------------------------
+// Polling: keep the page live while the booth is still uploading, then stop.
+// ---------------------------------------------------------------------------
+const POLL_MS = 5000;
+// With nothing pending, stop once the file list has been quiet this long
+// (shorter once the framed print is in; a timed session may still be waiting
+// for the guest to arrange it).
+const SETTLE_MS = 60000;
+const IDLE_STOP_MS = 10 * 60000;
+let lastKey = '';
+
+async function poll() {
+  const root = document.getElementById('content');
+  let res;
   let data;
   try {
+    res = await fetch('/api/sessions/' + TOKEN);
     data = await res.json();
   } catch (_e) {
-    setTimeout(main, POLL_MS);
+    // Transient network blip — keep polling instead of giving up.
+    setTimeout(poll, POLL_MS);
     return;
   }
   if (!res.ok || !data.files || data.exists === false) {
-    root.innerHTML = '<div class="err">We could not find this session. It may have expired.</div>';
+    root.innerHTML = '<div class="gone">Sesi foto ini tidak ditemukan.<br/>Mungkin sudah dihapus. Tanya petugas booth kalau butuh bantuan.</div>';
+    document.getElementById('dock').classList.add('hidden');
     return;
   }
 
   // Refresh the booth's progress signals alongside the file list so the
   // "still generating" indicator tracks the timed flow's arrange→generate
   // lifecycle even when no file is being added right now.
-  const [requestFile, resultFile] = await Promise.all([
-    fetchJson('print-request.json'),
-    fetchJson('print-result.json'),
-  ]);
-  CONTROL.printRequest = requestFile;
-  CONTROL.printResult = resultFile;
+  const signals = await Promise.all([fetchJson('print-request.json'), fetchJson('print-result.json')]);
+  CONTROL.printRequest = signals[0];
+  CONTROL.printResult = signals[1];
 
   const key = data.files
     .map(function (f) { return f.name + ':' + f.size; })
     .sort()
     .join(',');
+  const wasBusy = pendingNote(lastFiles) === 'busy';
   if (key !== lastKey) {
     lastKey = key;
     changeCount += 1;
     lastChangeAt = Date.now();
     render(data.files);
+  } else if (wasBusy !== (pendingNote(data.files) === 'busy')) {
+    render(data.files);
+  } else {
+    renderNote();
   }
-  setTimeout(main, POLL_MS);
+
+  const quiet = Date.now() - lastChangeAt;
+  const settled = data.files.length > 0 && pendingNote(data.files) === null &&
+    ((store.framed && quiet > SETTLE_MS) || quiet > IDLE_STOP_MS);
+  if (!settled) setTimeout(poll, POLL_MS);
 }
+
 // Print status (sessions.print_status via the Worker). Polled until final.
 const PRINT_LABELS = {
-  success: ['ok', '\u2713 Sudah dicetak'],
-  printing: ['', 'Sedang dicetak\u2026'],
+  success: ['ok', '\\u2713 Sudah dicetak'],
+  printing: ['', 'Sedang dicetak\\u2026'],
   queued: ['', 'Menunggu antrean cetak'],
   ready_to_print: ['', 'Menunggu antrean cetak'],
   error: ['err', 'Gagal dicetak, hubungi petugas'],
@@ -738,8 +992,9 @@ function pollPrint() {
     })
     .catch(function () { setTimeout(pollPrint, 8000); });
 }
-initHead();
-main();
+
+document.getElementById('timeText').textContent = CREATED_AT ? formatDate(CREATED_AT, true) : '';
+poll();
 pollPrint();
 </script>
 </body>
