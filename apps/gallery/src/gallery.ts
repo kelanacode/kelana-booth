@@ -8,6 +8,7 @@ const KELANA_LOGO_SVG = "<svg class=\"contact-logo\" xmlns=\"http://www.w3.org/2
 
 /** Contact for bookings, shown under every gallery. */
 const KELANA_INSTAGRAM = 'https://www.instagram.com/kelanacirebon_';
+const KELANA_WEBSITE = 'https://ruangkelana.com';
 const KELANA_WHATSAPP =
   'https://wa.me/6285287560280?text=' +
   encodeURIComponent('Halo Kelana! Saya lihat hasil photobooth-nya dan tertarik sewa photobooth untuk acara saya.');
@@ -151,6 +152,9 @@ export const renderGallery = (params: {
   .contact .row { flex-wrap:wrap; justify-content:center; }
   .wa { background:#25D366; color:#073B1C; }
   .ig { background:linear-gradient(45deg,#F58529,#DD2A7B 55%,#8134AF); color:#fff; }
+  .site-link { display:inline-flex; align-items:center; gap:7px; padding:6px 4px; color:var(--fg-2); font-size:.9rem; font-weight:700; text-decoration:none; border-bottom:1px solid transparent; }
+  .site-link:hover { color:var(--fg); border-bottom-color:currentColor; }
+  .site-link svg { width:17px; height:17px; flex-shrink:0; }
   footer { text-align:center; padding:12px 0 22px; color:var(--fg-3); font-size:.76rem; }
 
   /* Sticky save bar */
@@ -222,6 +226,10 @@ export const renderGallery = (params: {
         @kelanacirebon_
       </a>
     </div>
+    <a class="site-link" href="${KELANA_WEBSITE}" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"/></svg>
+      ruangkelana.com
+    </a>
   </section>
   <footer>Kelana Photobooth &middot; Cirebon</footer>
   <div class="dock hidden" id="dock"></div>
