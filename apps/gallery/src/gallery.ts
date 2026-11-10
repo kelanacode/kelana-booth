@@ -168,6 +168,7 @@ export const renderGallery = (params: {
   .v-stage { flex:1; min-height:0; position:relative; overflow:hidden; touch-action:pan-y pinch-zoom; }
   /* Absolutely centered so max-height resolves against the stage: tall framed strips shrink to fit instead of being cut off. */
   .v-stage img { position:absolute; inset:0; margin:auto; width:auto; height:auto; max-width:calc(100% - 24px); max-height:calc(100% - 8px); object-fit:contain; border-radius:6px; transition:transform .2s ease, opacity .2s ease; user-select:none; -webkit-user-drag:none; }
+  .v-spin { position:absolute; left:50%; top:50%; width:34px; height:34px; margin:-17px 0 0 -17px; border-width:3px; }
   .v-nav { position:absolute; top:50%; transform:translateY(-50%); width:42px; height:42px; border-radius:50%; border:0; background:rgba(255,255,255,.12); cursor:pointer; display:grid; place-items:center; color:#fff; }
   .v-nav svg { width:20px; height:20px; }
   .v-prev { left:max(10px, env(safe-area-inset-left, 0px)); }
@@ -624,7 +625,7 @@ function openViewer(index) {
   const many = store.viewItems.length > 1;
   viewerEl.innerHTML =
     '<div class="v-top"><span class="v-ctr" id="vCtr"></span><button class="icon-btn" type="button" id="vClose" aria-label="Tutup">' + ICON.x + '</button></div>' +
-    '<div class="v-stage" id="vStage"><img id="vImg" alt=""/>' +
+    '<div class="v-stage" id="vStage"><img id="vImg" alt=""/><span class="spin v-spin hidden" id="vSpin" aria-hidden="true"></span>' +
       (many ? '<button class="v-nav v-prev" type="button" id="vPrev" aria-label="Sebelumnya">' + ICON.l + '</button>' +
               '<button class="v-nav v-next" type="button" id="vNext" aria-label="Berikutnya">' + ICON.r + '</button>' : '') +
     '</div>' +
@@ -660,30 +661,75 @@ function openViewer(index) {
   viewerEl.querySelector('#vClose').focus();
 }
 
+// Viewer images are the full-size originals, so each one is fetched once,
+// decoded off-screen and only then swapped in. The neighbours are warmed up in
+// the background so next / previous is usually instant.
+const imageLoads = new Map();
+function loadImage(url) {
+  if (!imageLoads.has(url)) {
+    imageLoads.set(url, new Promise(function (resolve, reject) {
+      const im = new Image();
+      im.onload = function () {
+        if (im.decode) im.decode().then(resolve, resolve);
+        else resolve();
+      };
+      im.onerror = function () { imageLoads.delete(url); reject(new Error('load failed')); };
+      im.src = url;
+    }));
+  }
+  return imageLoads.get(url);
+}
+
+function preloadAround(index) {
+  const n = store.viewItems.length;
+  [1, -1, 2].forEach(function (offset) {
+    const item = store.viewItems[(index + offset + n) % n];
+    if (item) loadImage(item.url).catch(function () {});
+  });
+}
+
+let viewSeq = 0;
 function showViewerItem(dir) {
   if (!viewerEl) return;
   const item = store.viewItems[ui.viewIndex];
   if (!item) return;
+  const seq = ++viewSeq;
   const img = viewerEl.querySelector('#vImg');
-  const apply = function () {
-    img.src = item.url;
-    img.alt = item.label;
-    img.style.opacity = '1';
-    img.style.transform = 'none';
-  };
-  if (dir) {
-    img.style.opacity = '0';
-    img.style.transform = 'translateX(' + (dir * 30) + 'px)';
-    setTimeout(apply, 120);
-  } else {
-    apply();
-  }
+  const spin = viewerEl.querySelector('#vSpin');
+
+  // Counter, name and dots move right away so every tap is acknowledged.
   viewerEl.querySelector('#vCtr').textContent = (ui.viewIndex + 1) + ' / ' + store.viewItems.length;
   viewerEl.querySelector('#vName').textContent = item.label;
   const dots = viewerEl.querySelector('#vDots');
   if (dots) {
     dots.innerHTML = store.viewItems.map(function (_, i) { return '<i' + (i === ui.viewIndex ? ' class="on"' : '') + '></i>'; }).join('');
   }
+
+  // The outgoing picture fades so it never looks like the old one is stuck.
+  if (dir) {
+    img.style.opacity = '0';
+    img.style.transform = 'translateX(' + (-dir * 24) + 'px)';
+  }
+  const spinTimer = setTimeout(function () { if (seq === viewSeq) spin.classList.remove('hidden'); }, 150);
+
+  const swap = function () {
+    if (seq !== viewSeq || !viewerEl) return;
+    clearTimeout(spinTimer);
+    spin.classList.add('hidden');
+    img.src = item.url;
+    img.alt = item.label;
+    img.style.transition = 'none';
+    img.style.transform = dir ? 'translateX(' + (dir * 24) + 'px)' : 'none';
+    img.style.opacity = '0';
+    // Next frame: slide/fade the new picture in.
+    requestAnimationFrame(function () {
+      img.style.transition = '';
+      img.style.opacity = '1';
+      img.style.transform = 'none';
+    });
+  };
+  loadImage(item.url).then(swap, swap);
+  preloadAround(ui.viewIndex);
 }
 
 function stepViewer(delta) {
