@@ -186,13 +186,13 @@ export const renderGallery = (params: {
   /* Share fallback (link + QR) */
   .modal { position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.6); display:flex; align-items:flex-end; justify-content:center; }
   @media (min-width:640px) { .modal { align-items:center; } }
-  .sheet { width:100%; max-width:420px; background:#fff; color:var(--pbx-ink, #1b1424); border-radius:20px 20px 0 0; padding:22px var(--gutter-r) calc(20px + env(safe-area-inset-bottom, 0px)) var(--gutter-l); display:grid; gap:12px; justify-items:center; text-align:center; animation:up .22s ease; }
+  .sheet { width:100%; max-width:420px; background:#fff; color:var(--pbx-ink, #1b1424); border-radius:20px 20px 0 0; padding:22px var(--gutter-r) calc(20px + env(safe-area-inset-bottom, 0px)) var(--gutter-l); display:grid; grid-template-columns:minmax(0, 1fr); gap:12px; justify-items:center; text-align:center; animation:up .22s ease; }
   @media (min-width:640px) { .sheet { border-radius:20px; } }
   @keyframes up { from { transform:translateY(30px); opacity:0; } }
   .sheet h2 { margin:0; font-size:1.05rem; }
   .sheet p { margin:0; font-size:.84rem; color:#5b5368; }
   .sheet img { width:min(220px, 60vw); height:auto; border-radius:12px; }
-  .linkbox { width:100%; display:flex; gap:8px; align-items:center; background:#f1eef5; border-radius:12px; padding:6px 6px 6px 12px; }
+  .linkbox { width:100%; min-width:0; display:flex; gap:8px; align-items:center; background:#f1eef5; border-radius:12px; padding:6px 6px 6px 12px; }
   .linkbox span { flex:1; min-width:0; font-size:.78rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; color:#3b3346; }
   .linkbox .btn { min-height:36px; background:var(--brand); color:var(--brand-fg); flex:0 0 auto; }
   .sheet .btn-close { width:100%; background:#f1eef5; color:#1b1424; }
