@@ -60,6 +60,111 @@ export interface CaptureViewProps {
   onSlotPhotoLoad?: (naturalWidth: number, naturalHeight: number) => void;
 }
 
+/** Height classes shared by slot photos and their placeholders. */
+const SLOT_HEIGHT =
+  'h-20 sm:h-28 lg:h-32 [@media(orientation:landscape)_and_(max-height:500px)]:h-14';
+
+/** Ring spinner used while a photo is on its way. */
+const Spinner: React.FC<{ className?: string }> = ({ className = 'h-6 w-6' }) => (
+  <span
+    aria-hidden="true"
+    className={`${className} animate-spin rounded-full border-[3px] border-white/25 border-t-white`}
+  />
+);
+
+/**
+ * A slot's photo. Full-size camera captures take a moment to decode, so a
+ * pulsing placeholder (sized to the camera aspect) holds the slot until the
+ * image is ready, then the photo fades in.
+ */
+const SlotPhoto: React.FC<{
+  src: string;
+  slotNumber: number;
+  aspectRatio: number;
+  onLoad?: (naturalWidth: number, naturalHeight: number) => void;
+}> = ({ src, slotNumber, aspectRatio, onLoad }) => {
+  const [loadedSrc, setLoadedSrc] = React.useState<string | null>(null);
+  const loaded = loadedSrc === src;
+  return (
+    <span className="relative flex shrink-0 items-center justify-center">
+      {!loaded && (
+        <span
+          className={`flex ${SLOT_HEIGHT} animate-pulse items-center justify-center bg-white/15`}
+          style={{ aspectRatio }}
+          role="status"
+          aria-label={`Loading photo ${slotNumber}`}
+        >
+          <Spinner className="h-5 w-5 sm:h-6 sm:w-6" />
+        </span>
+      )}
+      <img
+        src={src}
+        alt={`Photo slot ${slotNumber}`}
+        className={`${SLOT_HEIGHT} w-auto max-w-32 object-contain transition-opacity duration-300 sm:max-w-44 lg:max-w-52 [@media(orientation:landscape)_and_(max-height:500px)]:max-w-24 ${
+          loaded ? 'opacity-100' : 'absolute opacity-0'
+        }`}
+        onLoad={(event) => {
+          setLoadedSrc(src);
+          const { naturalWidth, naturalHeight } = event.currentTarget;
+          if (naturalWidth > 0 && naturalHeight > 0) {
+            onLoad?.(naturalWidth, naturalHeight);
+          }
+        }}
+      />
+    </span>
+  );
+};
+
+/**
+ * A slot with no photo yet. The slot being shot shows a spinner while the
+ * camera works (or a soft pulse while it waits for its turn); later slots
+ * show a quiet pulsing placeholder with their number.
+ */
+const PendingSlot: React.FC<{
+  slotNumber: number;
+  isCurrent: boolean;
+  isCapturing: boolean;
+  aspectRatio: number;
+}> = ({ slotNumber, isCurrent, isCapturing, aspectRatio }) => (
+  <span
+    className={`relative flex ${SLOT_HEIGHT} shrink-0 flex-col items-center justify-center gap-1 overflow-hidden border ${
+      isCurrent ? 'border-white/70 bg-white/15' : 'animate-pulse border-white/25 bg-white/[0.07]'
+    }`}
+    style={{ aspectRatio }}
+    role={isCurrent && isCapturing ? 'status' : undefined}
+    aria-label={isCurrent && isCapturing ? `Capturing photo ${slotNumber}` : `Photo slot ${slotNumber}`}
+  >
+    {isCurrent && isCapturing ? (
+      <Spinner className="h-6 w-6 sm:h-8 sm:w-8" />
+    ) : (
+      <span className={`text-base font-black tabular-nums sm:text-xl ${isCurrent ? 'text-white' : 'text-white/45'}`}>
+        {slotNumber}
+      </span>
+    )}
+  </span>
+);
+
+/** The timed flow's "previous photo" card image, with a spinner until it decodes. */
+const LatestPhoto: React.FC<{ src: string }> = ({ src }) => {
+  const [loadedSrc, setLoadedSrc] = React.useState<string | null>(null);
+  const loaded = loadedSrc === src;
+  return (
+    <span className="relative block h-44 w-full overflow-hidden rounded-[8px] bg-black/35 shadow-lg sm:h-56">
+      {!loaded && (
+        <span className="absolute inset-0 flex animate-pulse items-center justify-center" role="status" aria-label="Loading photo">
+          <Spinner className="h-8 w-8" />
+        </span>
+      )}
+      <img
+        src={src}
+        alt="Foto precedente"
+        className={`h-full w-full object-contain transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+        onLoad={() => setLoadedSrc(src)}
+      />
+    </span>
+  );
+};
+
 /**
  * Presentational core of the capture screen: the live feed, header chips,
  * countdown/callouts, timed previous-photo card and the photo-slot progress
@@ -248,11 +353,7 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
         >
           {currentSlotAttemptCount}
         </span>
-        <img
-          src={latestPhoto}
-          alt="Foto precedente"
-          className="h-44 w-full rounded-[8px] bg-black/35 object-contain shadow-lg sm:h-56"
-        />
+        <LatestPhoto src={latestPhoto} />
         <p
           className="mt-2 text-center text-xs font-black uppercase tracking-[0.12em]"
           style={{ color: theme.surfaceForeground }}
@@ -300,26 +401,19 @@ export const CaptureView: React.FC<CaptureViewProps> = ({
                   }`}
                 >
                   {slot.photoUrl ? (
-                    <img
+                    <SlotPhoto
                       src={slot.photoUrl}
-                      alt={`Photo slot ${slot.slotNumber}`}
-                      className="h-20 w-auto max-w-32 object-contain sm:h-28 sm:max-w-44 lg:h-32 lg:max-w-52 [@media(orientation:landscape)_and_(max-height:500px)]:h-14 [@media(orientation:landscape)_and_(max-height:500px)]:max-w-24"
-                      onLoad={(event) => {
-                        const { naturalWidth, naturalHeight } = event.currentTarget;
-                        if (naturalWidth > 0 && naturalHeight > 0) {
-                          onSlotPhotoLoad?.(naturalWidth, naturalHeight);
-                        }
-                      }}
+                      slotNumber={slot.slotNumber}
+                      aspectRatio={photoAspectRatio}
+                      onLoad={onSlotPhotoLoad}
                     />
                   ) : (
-                    <span
-                      className="relative flex h-20 shrink-0 items-center justify-center border border-white/35 sm:h-28 lg:h-32 [@media(orientation:landscape)_and_(max-height:500px)]:h-14"
-                      style={{ aspectRatio: photoAspectRatio }}
-                    >
-                      <span className="px-1 text-center leading-tight text-white/60">
-                        Photo slot {slot.slotNumber}
-                      </span>
-                    </span>
+                    <PendingSlot
+                      slotNumber={slot.slotNumber}
+                      isCurrent={slot.isCurrent}
+                      isCapturing={isCapturing || isHoldingStill}
+                      aspectRatio={photoAspectRatio}
+                    />
                   )}
                 </span>
               ))}
