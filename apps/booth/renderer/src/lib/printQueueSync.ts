@@ -9,6 +9,7 @@ import {
   dropReadySession,
   readySessionsSnapshot,
 } from './printListener';
+import { framedToPrintSheet } from './printSheet';
 import { useBoothConfig } from '../store/boothConfigStore';
 import { useSessionStore } from '../store/sessionStore';
 import { IElectronAPIPrintJobState, IElectronAPIPrintQueueSnapshot } from '../global';
@@ -43,19 +44,12 @@ const SESSION_TO_BOOTH_STATUS: Record<SessionPrintStatus, BoothPrintStatus> = {
 
 const IMAGE_WAIT_MS = 45000;
 
-const blobToDataUrl = (blob: Blob): Promise<string> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error('Reading the framed photo failed.'));
-    reader.readAsDataURL(blob);
-  });
-
 /**
- * Resolves the framed image for a job. In manual mode the blob is already in
- * IndexedDB; in auto mode it may still be generating, so poll briefly.
+ * Resolves the framed image for a job and returns it laid out as the print
+ * sheet (lib/printSheet.ts). In manual mode the blob is already in IndexedDB;
+ * in auto mode it may still be generating, so poll briefly.
  */
-const resolveFramedDataUrl = async (token: string, name: string): Promise<string> => {
+const resolvePrintSheet = async (token: string, name: string): Promise<string> => {
   const deadline = Date.now() + IMAGE_WAIT_MS;
   let lastError = 'No framed image is available for this session.';
   let attempt = 0;
@@ -63,7 +57,7 @@ const resolveFramedDataUrl = async (token: string, name: string): Promise<string
   while (Date.now() < deadline) {
     const cached = await getUploadedBlob(token, name);
     if (cached) {
-      return blobToDataUrl(cached);
+      return framedToPrintSheet(cached);
     }
 
     // Only reach for the gallery on the first pass and then occasionally.
@@ -73,7 +67,7 @@ const resolveFramedDataUrl = async (token: string, name: string): Promise<string
         try {
           const response = await fetch(url);
           if (response.ok) {
-            return blobToDataUrl(await response.blob());
+            return await framedToPrintSheet(await response.blob());
           }
           lastError = `Gallery returned ${response.status}.`;
         } catch (error) {
@@ -98,7 +92,7 @@ const handleResolveImage = async (request: { jobId: string; token?: string; file
     if (!request.token) {
       throw new Error('This print job has no session token to resolve an image from.');
     }
-    const dataUrl = await resolveFramedDataUrl(request.token, request.fileName || 'framed.png');
+    const dataUrl = await resolvePrintSheet(request.token, request.fileName || 'framed.png');
     await api.provideImage({ jobId: request.jobId, dataUrl });
   } catch (error) {
     await api.provideImage({

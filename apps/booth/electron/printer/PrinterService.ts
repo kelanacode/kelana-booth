@@ -3,16 +3,31 @@ import * as fs from 'fs/promises';
 import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
+import {
+  FINISHED_JOB,
+  cancelWindowsJob,
+  decodeWindowsJobId,
+  encodeWindowsJobId,
+  listWindowsPrinters,
+  printOnWindows,
+  readWindowsPrinter,
+  windowsJobState,
+  windowsPrinterState,
+  windowsReasons,
+} from './WindowsPrinter';
 
 /**
- * CUPS-backed printer bridge for the Canon Selphy CP1000 (dye-sub) printer.
+ * Printer bridge for the Canon Selphy CP1000 (dye-sub) printer.
  *
- * The booth's production device runs Ubuntu, where the Selphy is a normal CUPS
- * queue (installed through Gutenprint's `canonselphyneo` backend — see
- * docs/ubuntu-selphy-print-setup.md). This service shells out to the standard
- * `lpstat`/`lp`/`lpq`/`cancel` CLI so there is nothing to bundle. On platforms
- * without CUPS (e.g. the Windows dev machine) every call surfaces
- * `available: false` and the renderer keeps using its simulated print fallback.
+ * - Ubuntu (the production booth device): the Selphy is a normal CUPS queue
+ *   (installed through Gutenprint's `canonselphyneo` backend — see
+ *   docs/ubuntu-selphy-print-setup.md). This service shells out to the standard
+ *   `lpstat`/`lp`/`lpq`/`cancel` CLI so there is nothing to bundle.
+ * - Windows: prints through Canon's own driver via PowerShell (WindowsPrinter.ts,
+ *   docs/windows-selphy-print-setup.md).
+ *
+ * Elsewhere every call surfaces `available: false` and the renderer keeps
+ * using its simulated print fallback.
  *
  * It exposes both a one-shot `print()` (used by the setup test sheet and the
  * auto-print path) and lower-level job primitives (`submitFile`, `jobStatus`,
@@ -89,6 +104,7 @@ const execFile = (
   });
 
 const cupssAvailable = process.platform === 'linux' || process.platform === 'darwin';
+const isWindows = process.platform === 'win32';
 
 const windowedExec = async <T>(fn: () => Promise<T>) => {
   try {
@@ -123,9 +139,39 @@ const hasJob = (stdout: string, jobId: string): boolean =>
     .split('\n')
     .some((line) => line.trim().startsWith(`${jobId} `) || line.trim() === jobId);
 
+/**
+ * Gutenprint's PageSize names for the SELPHY CP910 / CP1000 / CP1200 papers
+ * (print-dyesub.c, `cp910_page`), keyed by the booth's paper-size setting;
+ * anything else prints on the postcard, which the print layout is tuned for
+ * (renderer/src/lib/printSheet.ts).
+ */
+const SELPHY_PAGE_SIZES: Record<string, string> = {
+  '100x148mm': 'Postcard',
+  '54x86mm': 'w155h244',
+};
+
+const selphyPageSize = (paperSize?: string): string => SELPHY_PAGE_SIZES[paperSize ?? ''] ?? 'Postcard';
+
+/** The borderless paper names in Canon's SELPHY driver on Windows, keyed the same way. */
+const SELPHY_WINDOWS_PAPERS: Record<string, string> = {
+  '100x148mm': 'P borderless',
+  '54x86mm': 'C borderless',
+};
+
 export class PrinterService {
   /** Lists CUPS queues (`lpstat -p`) plus the number of active jobs. */
   async listPrinters(): Promise<PrinterListResult> {
+    if (isWindows) {
+      const listed = await windowedExec(() => listWindowsPrinters());
+      if (!listed.ok) {
+        return { available: false, printers: [], activeJobs: 0, error: listed.error };
+      }
+      return {
+        available: true,
+        printers: listed.value.map((printer) => printer.name),
+        activeJobs: listed.value.reduce((sum, printer) => sum + printer.jobs, 0),
+      };
+    }
     if (!cupssAvailable) {
       return { available: false, printers: [], activeJobs: 0, error: 'CUPS is only available on Linux/macOS.' };
     }
@@ -157,6 +203,21 @@ export class PrinterService {
 
   /** Reports a single queue's state (`idle` / `printing` / `stopped`) + reasons. */
   async printerStatus(queueName: string): Promise<PrinterStatusResult> {
+    if (isWindows && queueName) {
+      const read = await windowedExec(() => readWindowsPrinter(queueName));
+      if (!read.ok) {
+        return { available: false, state: 'unknown', message: read.error, error: read.error };
+      }
+      const { printer, status, offline, jobs } = read.value;
+      const jobStatuses = jobs.map((job) => job.status);
+      const using = printer !== queueName ? `${printer}: ` : '';
+      return {
+        available: true,
+        state: offline ? 'stopped' : windowsPrinterState(status, jobStatuses),
+        message: `${using}${status}${jobs.length > 0 ? ` · ${jobs.length} job(s) in the queue` : ''}`,
+        reasons: windowsReasons([status, ...jobStatuses], offline),
+      };
+    }
     if (!cupssAvailable || !queueName) {
       return { available: false, state: 'unavailable', message: 'CUPS is not available here.' };
     }
@@ -215,8 +276,8 @@ export class PrinterService {
    * deletes the temp file. Used by the setup test sheet and auto-print.
    */
   async print(payload: PrinterPrintPayload): Promise<PrinterPrintResult> {
-    if (!cupssAvailable) {
-      return { ok: false, error: 'CUPS is only available on Linux/macOS — print was skipped.' };
+    if (!cupssAvailable && !isWindows) {
+      return { ok: false, error: 'Printing needs CUPS (Linux/macOS) or Windows — print was skipped.' };
     }
     if (!payload.queueName) {
       return { ok: false, error: 'No printer selected.' };
@@ -240,6 +301,9 @@ export class PrinterService {
    * file as soon as `lp` accepts the job).
    */
   async submitFile(payload: PrinterPrintPayload, filePath: string): Promise<PrinterPrintResult> {
+    if (isWindows) {
+      return this.submitFileOnWindows(payload, filePath);
+    }
     if (!cupssAvailable) {
       return { ok: false, error: 'CUPS is only available on Linux/macOS — print was skipped.' };
     }
@@ -260,6 +324,22 @@ export class PrinterService {
 
   /** Reports a CUPS job's state by id. */
   async jobStatus(queueName: string, jobId: string): Promise<PrinterJobStatusResult> {
+    if (isWindows) {
+      const ref = decodeWindowsJobId(jobId);
+      if (!ref) {
+        return { ok: false, state: 'unknown' };
+      }
+      if (ref.id === FINISHED_JOB) {
+        return { ok: true, state: 'completed' };
+      }
+      const read = await windowedExec(() => readWindowsPrinter(ref.printer));
+      if (!read.ok) {
+        // A failed status read is not a failed print: keep waiting (the queue times out stuck jobs).
+        return { ok: false, state: 'processing', message: read.error };
+      }
+      const job = read.value.jobs.find((entry) => String(entry.id) === ref.id);
+      return { ok: true, state: windowsJobState(job?.status), message: job?.status };
+    }
     if (!cupssAvailable || !jobId) {
       return { ok: false, state: 'unknown' };
     }
@@ -289,6 +369,17 @@ export class PrinterService {
 
   /** Lists the jobs currently in a queue (`lpstat -o`). */
   async queueJobs(queueName: string): Promise<PrinterQueueJob[]> {
+    if (isWindows && queueName) {
+      const read = await windowedExec(() => readWindowsPrinter(queueName));
+      return read.ok
+        ? read.value.jobs.map((job) => ({
+            id: encodeWindowsJobId(read.value.printer, String(job.id)),
+            queueName,
+            user: job.user,
+            size: job.size,
+          }))
+        : [];
+    }
     if (!cupssAvailable || !queueName) {
       return [];
     }
@@ -309,11 +400,49 @@ export class PrinterService {
 
   /** Cancels a CUPS job by id (`cancel <id>`). */
   async cancelJob(jobId: string): Promise<{ ok: boolean; error?: string }> {
+    if (isWindows) {
+      const ref = jobId ? decodeWindowsJobId(jobId) : null;
+      if (!ref || ref.id === FINISHED_JOB) {
+        return { ok: true };
+      }
+      const result = await windowedExec(() => cancelWindowsJob(ref.printer, Number(ref.id)));
+      return result.ok ? { ok: true } : { ok: false, error: result.error };
+    }
     if (!cupssAvailable || !jobId) {
       return { ok: false, error: 'CUPS is not available here.' };
     }
     const result = await windowedExec(() => execFile('cancel', [jobId]));
     return result.ok ? { ok: true } : { ok: false, error: result.error };
+  }
+
+  /**
+   * Windows: prints the borderless sheet on the driver's borderless paper for
+   * the paper size. The job id carries the printer name so it can be tracked
+   * and cancelled later.
+   */
+  private async submitFileOnWindows(payload: PrinterPrintPayload, filePath: string): Promise<PrinterPrintResult> {
+    if (!payload.queueName) {
+      return { ok: false, error: 'No printer selected.' };
+    }
+    const documentName = `Photo booth ${path.basename(payload.fileName || 'print')} ${Date.now().toString(36)}`;
+    const printed = await windowedExec(() =>
+      printOnWindows({
+        printer: payload.queueName,
+        imagePath: filePath,
+        paper: SELPHY_WINDOWS_PAPERS[payload.paperSize ?? ''] ?? SELPHY_WINDOWS_PAPERS['100x148mm'],
+        copies: payload.copies && payload.copies > 0 ? payload.copies : 1,
+        documentName,
+      }),
+    );
+    if (!printed.ok) {
+      return { ok: false, error: printed.error };
+    }
+    const { printer, id } = printed.value;
+    return {
+      ok: true,
+      jobId: encodeWindowsJobId(printer, id || FINISHED_JOB),
+      output: id ? `Sent to ${printer} (job ${id}).` : `Sent to ${printer}.`,
+    };
   }
 
   /** Builds the `lp` argument list from a payload. */
@@ -325,18 +454,24 @@ export class PrinterService {
         args.push('-o', `${key}=${value}`);
       }
     } else {
-      // Fill the whole sheet. Without a scaling option CUPS fits the image
-      // inside the printer's imageable area (page minus its margins), which
-      // leaves white strips on the Selphy. The frames already match the
-      // paper's aspect ratio (100x148), so filling crops next to nothing.
-      // print-scaling is the IPP name (cups-filters 1.17+); `fill` is the
-      // older cups-filters spelling. Unknown options are ignored by CUPS.
+      // Borderless SELPHY print. The renderer sends the print sheet
+      // (renderer/src/lib/printSheet.ts): a 100 × 150 mm canvas, the shape of
+      // the printer's whole printed area. Gutenprint's "Postcard" page is that
+      // area (1248×1872 px at 300 dpi = 105.66×158.5 mm), the 100×148 mm card
+      // plus the margin printed past its edges.
+      //  - PageSize: Gutenprint's own name. `media=100x148mm` matched none of
+      //    its pages, so CUPS ignored it and used the default page.
+      //  - StpBorderless: without it Gutenprint squeezes the page into an inner
+      //    area with 13/13/16/19 pt margins (left/right/top/bottom), which
+      //    printed as white strips at the card's sides and bottom.
+      //  - print-scaling=fill (`fill` in older cups-filters): the sheet has the
+      //    page's shape, so it covers the whole page.
+      // Unknown options are ignored by CUPS.
+      args.push('-o', `PageSize=${selphyPageSize(payload.paperSize)}`);
+      args.push('-o', 'StpBorderless=True');
       args.push('-o', 'print-scaling=fill');
       args.push('-o', 'fill');
       args.push('-o', 'position=center');
-      if (payload.paperSize) {
-        args.push('-o', `media=${payload.paperSize}`);
-      }
       if (payload.mediaType) {
         args.push('-o', `media-type=${payload.mediaType}`);
       }

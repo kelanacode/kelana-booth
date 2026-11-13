@@ -95,9 +95,10 @@ lpoptions -p SELPHY_CP1000 -l
 
 Map the booth's settings to the real keys:
 
-| Booth setting | Preferred CUPS key | Gutenprint PPD option |
+| Booth setting | CUPS option the app sends | Gutenprint PPD option |
 | --- | --- | --- |
-| Paper size (4×6) | `media` / `PageSize` | `PageSize` (e.g. `w288h432` / `Postcard`) |
+| Paper size | `PageSize=Postcard` (100×148), `w253h337` (L), `w155h244` (card) | `PageSize` |
+| Borderless (always on) | `StpBorderless=True` | `StpBorderless` |
 | Media type | `media-type` | `StpMediaType` |
 | Quality | `print-quality` | `StpQuality` |
 | Color mode | `print-color-mode` | `StpColorCorrection` / `StpColorMode` |
@@ -106,8 +107,34 @@ If the generic keys are ignored, set explicit overrides from the booth's printer
 settings (the app accepts a `cupsOptions` map on the print payload) or adjust the
 defaults in `apps/booth/electron/printer/PrinterService.ts`.
 
-The 4×6 paper size is the critical one — printing on the wrong size wastes a
-ribbon segment.
+### How borderless works on the SELPHY
+
+The SELPHY prints past the card's edges. For the 100×148 mm postcard it prints
+1248×1872 px at 300 dpi (105.66×158.5 mm): about 2.8 mm runs off each side and
+5.25 mm off each end. Gutenprint's `Postcard` page is that whole printed area
+(`cp910_page` in Gutenprint's `print-dyesub.c`, same in 5.3.3 – 5.3.6), so:
+
+- `media=100x148mm` matches no Gutenprint page, and CUPS ignores it. Use `PageSize=Postcard`.
+- With `StpBorderless=False` (the PPD default) Gutenprint keeps 13/13/16/19 pt
+  margins (left/right/top/bottom) inside the printed area. On the card these show
+  as white strips at the sides (~1.8 mm) and bottom (~1.5 mm).
+
+The app sends the print sheet from `apps/booth/renderer/src/lib/printSheet.ts`:
+a white 100 × 150 mm canvas (the printed area's shape) with the frame resized to
+97 × 140 mm, 1.5 mm from the left and 4.5 mm from the top. That layout was tuned
+on the Windows driver (`windows-selphy-print-setup.md`); Gutenprint centres the
+card in the printed area slightly differently, so check one session print on
+Ubuntu: the top may show a sliver (~0.5 mm) of the white canvas.
+
+To make manual `lp` tests from the shell borderless too, set the queue defaults:
+
+```bash
+sudo lpadmin -p SELPHY_CP1000 -o PageSize=Postcard -o StpBorderless=True
+```
+
+Printing on the wrong paper size wastes a ribbon segment, so check
+`lpoptions -p SELPHY_CP1000 -l | grep -E "PageSize|StpBorderless"` once after
+setting up the queue.
 
 ## 7. Status / paper-out detection
 

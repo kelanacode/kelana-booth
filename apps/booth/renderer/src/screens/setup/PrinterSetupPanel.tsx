@@ -3,6 +3,7 @@ import { useBoothConfig } from '../../store/boothConfigStore';
 import { IElectronAPIPrinterStatusResult } from '../../global';
 import { NumberStepper } from '../../components/fields/Stepper';
 import { GlobalSettingNote, useGlobalSettingsEditor } from './GlobalSettingNote';
+import { composePrintSheet, printSheetDataUrl } from '../../lib/printSheet';
 
 const PAPER_SIZES = [
   { value: '100x148mm', label: '4×6 — 100×148mm' },
@@ -18,13 +19,16 @@ const QUALITIES = [
   { value: 5, label: 'High' },
 ];
 
-/** Tiny self-generated test sheet (colored blocks + text) for the Selphy. */
-const makeTestSheet = (): string => {
+/**
+ * Tiny self-generated test sheet (colored blocks + text) for the Selphy,
+ * printed through the same print layout as a session (lib/printSheet.ts).
+ */
+const makeTestSheet = (): HTMLCanvasElement => {
   const canvas = document.createElement('canvas');
   canvas.width = 1000;
   canvas.height = 1480;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return '';
+  if (!ctx) return canvas;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   const colors = ['#ff4bb5', '#4acaf1', '#d9f85a', '#a35ef6', '#ff7d57', '#4d2d85'];
@@ -38,7 +42,7 @@ const makeTestSheet = (): string => {
   ctx.fillText('SELPHY CP1000 TEST', canvas.width / 2, 100);
   ctx.font = 'bold 30px sans-serif';
   ctx.fillText('Photo Booth print test', canvas.width / 2, canvas.height - 90);
-  return canvas.toDataURL('image/jpeg', 0.92);
+  return canvas;
 };
 
 const hasElectronPrinter = () => typeof window.electronAPI?.printer?.list === 'function';
@@ -118,7 +122,7 @@ export const PrinterSetupPanel: React.FC = () => {
     setTestResult(null);
     try {
       const result = await window.electronAPI.printer.print({
-        dataUrl: makeTestSheet(),
+        dataUrl: printSheetDataUrl(composePrintSheet(makeTestSheet())),
         fileName: 'selphy-test.jpg',
         queueName: printer.queueName,
         copies: printer.copies,
@@ -194,11 +198,9 @@ export const PrinterSetupPanel: React.FC = () => {
           </span>
         </label>
         <p className="mt-2 text-xs font-semibold leading-relaxed text-pbx-ink/75">
-          Prints the framed photo through CUPS to the Canon Selphy CP1000 when a queue is detected
-          and reachable ({' '}
-          <span className="font-black">the booth device runs Ubuntu</span> ). When disabled or when
-          no printer is available, the booth falls back to the simulated print so the flow never
-          blocks.
+          Prints the framed photo on the Canon Selphy CP1000: through CUPS on Ubuntu, or through
+          Canon&apos;s printer driver on Windows. When disabled or when no printer is available, the
+          booth falls back to the simulated print so the flow never blocks.
         </p>
 
         {printer.enabled && (
@@ -268,8 +270,8 @@ export const PrinterSetupPanel: React.FC = () => {
               </p>
             ) : printers.length === 0 ? (
               <p className="text-xs font-bold text-pbx-ink/60">
-                No CUPS queues found. Install the Selphy (PPD) and run{' '}
-                <span className="font-mono">sudo lpadmin -p SELPHY_CP1000 -E -m selphycp1000.ppd</span>.
+                No printers found. On Windows, install Canon&apos;s SELPHY CP1000 driver and connect
+                the printer by USB. On Ubuntu, set up the CUPS queue (docs/ubuntu-selphy-print-setup.md).
               </p>
             ) : (
               <div className="space-y-1.5">
@@ -293,7 +295,7 @@ export const PrinterSetupPanel: React.FC = () => {
                   </label>
                 ))}
                 <div className="pt-1 text-xs font-semibold text-pbx-ink/60">
-                  Active CUPS jobs: <span className="font-black">{activeJobs}</span>
+                  Active print jobs: <span className="font-black">{activeJobs}</span>
                 </div>
               </div>
             )}
