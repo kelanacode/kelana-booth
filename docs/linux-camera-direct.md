@@ -200,7 +200,7 @@ sudo modprobe -r v4l2loopback
 | Symptom | Cause / fix |
 |---|---|
 | `gphoto2 --auto-detect` shows nothing | Camera off, USB cable, battery, or udev rule not applied — replug after `udevadm control --reload` |
-| Capture reports `0x2019: PTP DEVICE BUSY` or `COULD NOT CAPTURE IMAGE` | Do not start another gphoto2 command. Exit auxiliary camera tools, disable Auto Power Off, use One Shot AF, then retry from the app. The service already waits for the Live View process to exit and adds a 500 ms camera settling event before capture. Persistent errors still require a charged battery, a stable USB connection, and a camera power-cycle. |
+| Capture reports `0x2019: PTP DEVICE BUSY` or `COULD NOT CAPTURE IMAGE` | Do not start another gphoto2 command. Exit auxiliary camera tools, disable Auto Power Off, use One Shot AF, then retry from the app. The service already waits for the Live View process to exit, adds a 500 ms camera settling event before capture, waits 800 ms after a shot before restarting Live View, and retries any command the camera answers busy (3 retries, 0.5 / 1 / 1.5 s apart; logged as `[camera] busy …`). Persistent errors still require a charged battery, a stable USB connection, and a camera power-cycle. |
 | PTP commands time out ("Could not query kernel driver …") | **Camera-side, not driver.** Low battery / auto-power-off / camera state. Recharge, power-cycle, replug. (On Windows the active driver `libusbK` was proven correct; the failure was the camera refusing PTP.) |
 | Live View starts then stops | 600D **Auto Power Off** — set to Disable in the camera menu |
 | No HDMI signal | 600D outputs HDMI **only during Live View**; port is mini-HDMI (Type-C) |

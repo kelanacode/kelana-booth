@@ -66,6 +66,33 @@ const READ_SETTINGS_TIMEOUT_MS = 20000;
 const SOI_MARKER = Buffer.from([0xff, 0xd8]);
 /** Drop the frame buffer if it ever balloons (it never should). */
 const MAX_BUFFER_BYTES = 8 * 1024 * 1024;
+/**
+ * How gphoto2 reports the camera answering PTP "Device Busy" (0x2019, which
+ * libgphoto2 turns into error -110 "I/O in progress"). The 600D answers it while
+ * it is still switching Live View off or finishing a photo.
+ */
+const BUSY_RE = /0x2019|device busy|I\/O in progress|\(-110\b/i;
+/** Wait before each retry of a command the camera answered busy (3 retries, 3 s in all). */
+const BUSY_RETRY_DELAYS_MS = [500, 1000, 1500];
+/** Pause after a photo before Live View restarts, while the camera finishes the shot. */
+const POST_CAPTURE_SETTLE_MS = 800;
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+const isBusyError = (error: unknown): boolean =>
+  (error as { busy?: unknown } | null)?.busy === true ||
+  BUSY_RE.test(error instanceof Error ? error.message : String(error));
+
+/**
+ * The error a failed Live View process leaves on stderr: its last lines before
+ * gphoto2's generic "For debugging messages…" footer, and whether it was "busy".
+ */
+const streamError = (stderr: string, fallback: string): Error => {
+  const lines = stderr.split(/^For debugging messages/m)[0].trim().split('\n');
+  const error = new Error(lines.slice(-2).join(' · ').trim() || fallback);
+  if (BUSY_RE.test(stderr)) (error as Error & { busy?: boolean }).busy = true;
+  return error;
+};
 
 /**
  * gphoto2 config paths for the exposure/image settings a booth operator cares
@@ -224,7 +251,7 @@ export class GphotoCameraService {
       await this.ensureCameraDetected(forceDetection);
       this.capturePrepared = false;
       this.restoreAfterCapture = false;
-      await this.startMovieStream();
+      await this.startMovieStreamRetrying();
       return this.state();
     } catch (error) {
       this.setStatus('ERROR', this.describe(error));
@@ -341,7 +368,7 @@ export class GphotoCameraService {
           this.events.emit('status', this.state());
         }
         if (restoreLiveView) {
-          this.scheduleLiveViewRestore();
+          this.scheduleLiveViewRestore(undefined, POST_CAPTURE_SETTLE_MS);
         } else {
           this.setStatus('READY');
         }
@@ -351,7 +378,7 @@ export class GphotoCameraService {
         this.capturePrepared = false;
         this.restoreAfterCapture = false;
         if (restoreLiveView) {
-          this.scheduleLiveViewRestore(message);
+          this.scheduleLiveViewRestore(message, POST_CAPTURE_SETTLE_MS);
         } else {
           this.setStatus('ERROR', message);
         }
@@ -360,14 +387,22 @@ export class GphotoCameraService {
     });
   }
 
-  private scheduleLiveViewRestore(captureError?: string): void {
+  /**
+   * Restarts Live View (queued). `settleMs` waits first — after a photo the
+   * camera is still finishing it and would answer the restart "busy". The status
+   * stays CAPTURING meanwhile, so a shot taken now still queues on the Canon.
+   */
+  private scheduleLiveViewRestore(captureError?: string, settleMs = 0): void {
     void this.enqueue(async () => {
+      if (settleMs > 0) {
+        await sleep(settleMs);
+      }
       const restoreStartedAt = Date.now();
       try {
         this.capturePrepared = false;
         this.restoreAfterCapture = false;
         this.setStatus('CONNECTING', captureError);
-        await this.startMovieStream();
+        await this.startMovieStreamRetrying();
         if (captureError) {
           this.error = captureError;
           this.events.emit('status', this.state());
@@ -687,6 +722,26 @@ export class GphotoCameraService {
   }
 
   /**
+   * Starts Live View, retrying while the camera answers busy (still finishing a
+   * photo or a settings change). Startup failures leave the status CONNECTING,
+   * so frames from a later attempt still flow; callers set ERROR if all fail.
+   */
+  private async startMovieStreamRetrying(): Promise<void> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await this.startMovieStream();
+        return;
+      } catch (error) {
+        if (attempt >= BUSY_RETRY_DELAYS_MS.length || !isBusyError(error)) {
+          throw error;
+        }
+        console.warn(`[camera] Live View: camera busy, retry ${attempt + 1} in ${BUSY_RETRY_DELAYS_MS[attempt]}ms`);
+        await sleep(BUSY_RETRY_DELAYS_MS[attempt]);
+      }
+    }
+  }
+
+  /**
    * Engages the live stream. With `--stdout --capture-movie` the Canon keeps its
    * LiveView engaged and pushes frames continuously — we only forward them to the
    * renderer, never persist them, so the mirror never grows a file or re-triggers.
@@ -754,8 +809,7 @@ export class GphotoCameraService {
       this.movieChild = null;
       this.movieStreamReady = false;
       this.frameBuffer = Buffer.alloc(0);
-      const detail = stderrTail.trim().split('\n').slice(-2).join(' · ');
-      const message = new Error(detail || this.describe(error));
+      const message = streamError(stderrTail, this.describe(error));
       failReady(message);
       this.setStatus('ERROR', message.message);
     });
@@ -763,18 +817,20 @@ export class GphotoCameraService {
       if (this.movieChild !== child) {
         return;
       }
+      // Failing before the first frame is the caller's to report (it may retry).
+      const startingUp = this.movieReady === waiter;
       this.movieChild = null;
       this.movieStreamReady = false;
       this.frameBuffer = Buffer.alloc(0);
-      const detail = stderrTail.trim().split('\n').slice(-2).join(' · ');
-      failReady(new Error(detail || 'Live View stopped before delivering a frame.'));
-      if (this.movieStopPromise !== null) {
+      const failure = streamError(stderrTail, 'Live View stopped before delivering a frame.');
+      failReady(failure);
+      if (this.movieStopPromise !== null || startingUp) {
         return;
       }
       if (this.status === 'LIVE_VIEW' || this.status === 'CONNECTING') {
         this.setStatus(
           'ERROR',
-          detail || 'Live view stream stopped unexpectedly. Replug the camera and tap Retry.',
+          streamError(stderrTail, 'Live view stream stopped unexpectedly. Replug the camera and tap Retry.').message,
         );
       }
     });
@@ -918,7 +974,31 @@ export class GphotoCameraService {
     this.resolveMovieReady();
   }
 
-  private run(args: string[], options: RunOptions = {}): Promise<string> {
+  /**
+   * Runs one gphoto2 command, retrying when the camera answers busy: it refused
+   * the command because it is still settling (Live View just switched off, a
+   * photo still finishing). Commands run inside the queue, so nothing else
+   * reaches the camera between attempts. A capture is retried as a whole; in the
+   * rare case the camera was busy only after the shutter fired, the retry takes
+   * one more photo and that is the one returned.
+   */
+  private async run(args: string[], options: RunOptions = {}): Promise<string> {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await this.runOnce(args, options);
+      } catch (error) {
+        if (attempt >= BUSY_RETRY_DELAYS_MS.length || !isBusyError(error)) {
+          throw error;
+        }
+        console.warn(
+          `[camera] busy on \`${args.join(' ')}\`, retry ${attempt + 1} in ${BUSY_RETRY_DELAYS_MS[attempt]}ms`,
+        );
+        await sleep(BUSY_RETRY_DELAYS_MS[attempt]);
+      }
+    }
+  }
+
+  private runOnce(args: string[], options: RunOptions = {}): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       execFile(
         this.binary,
