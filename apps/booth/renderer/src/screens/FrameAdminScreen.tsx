@@ -24,6 +24,7 @@ import {
   clearFrameTemplateDraft,
   getFrameTemplateDraft,
 } from '../utils/frameDrafts';
+import { CanvasSizeInfo } from './admin/CanvasSizeInfo';
 import { ColorField, FileField, NumberField, TextField } from './admin/fields';
 import { PhotoAreasPanel } from './admin/PhotoAreasPanel';
 import { QrSlotsPanel } from './admin/QrSlotsPanel';
@@ -1871,25 +1872,21 @@ const nudgeRef = useRef(false);
                   onChange={(value) => updateTemplate({ frameLayerZIndex: value })}
                 />
 
-                <div className="flex items-center justify-between gap-2 sm:col-span-2">
-                  <div className="flex flex-col">
-                    <span className="mb-1 text-xs font-black uppercase tracking-[0.14em] text-pbx-ink">
+                <div className="sm:col-span-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-black uppercase tracking-[0.14em] text-pbx-ink">
                       Canvas Size
                     </span>
-                    <span className="font-mono text-xs font-bold text-pbx-secondary-strong">
-                      {draftTemplate.width < draftTemplate.height
-                        ? '100.0 × 148.0 mm (3.94 × 5.83 in.)'
-                        : '148.0 × 100.0 mm (5.83 × 3.94 in.)'}
-                    </span>
+                    <button
+                      type="button"
+                      onClick={rotateTemplate}
+                      title="Rotate between landscape and portrait"
+                      className="rounded-[10px] border-[3px] border-pbx-secondary bg-white px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-pbx-secondary-strong transition hover:bg-pbx-tint"
+                    >
+                      {draftTemplate.width < draftTemplate.height ? '↻ Landscape' : '↺ Portrait'}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={rotateTemplate}
-                    title="Rotate between landscape and portrait"
-                    className="rounded-[10px] border-[3px] border-pbx-secondary bg-white px-3 py-2 text-xs font-black uppercase tracking-[0.12em] text-pbx-secondary-strong transition hover:bg-pbx-tint"
-                  >
-                    {draftTemplate.width < draftTemplate.height ? '↻ Landscape' : '↺ Portrait'}
-                  </button>
+                  <CanvasSizeInfo width={draftTemplate.width} height={draftTemplate.height} />
                 </div>
 
                 <ColorField

@@ -1,8 +1,13 @@
 import { FrameConfig, FramePhotoPlacement, FrameTemplateConfig } from '@photo-booth/types';
 
+/**
+ * Blank frame canvas: the print layout's 97 × 140 mm frame box at 300 dpi, so
+ * a frame built without artwork prints without being stretched (see
+ * lib/printSheet.ts).
+ */
 export const DEFAULT_FRAME_CANVAS = {
-  width: 1200,
-  height: 1600,
+  width: 1146,
+  height: 1654,
 } as const;
 
 const DEFAULT_SLOT_LAYOUTS: Record<number, FramePhotoPlacement[]> = {
@@ -10,10 +15,10 @@ const DEFAULT_SLOT_LAYOUTS: Record<number, FramePhotoPlacement[]> = {
     {
       slotNumber: 1,
       sourcePhotoSlot: 1,
-      x: 120,
-      y: 160,
-      width: 960,
-      height: 1160,
+      x: 115,
+      y: 165,
+      width: 917,
+      height: 1199,
       borderRadius: 0,
       zIndex: 10,
       objectFit: 'cover',
@@ -24,10 +29,10 @@ const DEFAULT_SLOT_LAYOUTS: Record<number, FramePhotoPlacement[]> = {
     {
       slotNumber: 1,
       sourcePhotoSlot: 1,
-      x: 130,
-      y: 150,
-      width: 940,
-      height: 520,
+      x: 124,
+      y: 155,
+      width: 898,
+      height: 538,
       borderRadius: 0,
       zIndex: 10,
       objectFit: 'cover',
@@ -36,10 +41,10 @@ const DEFAULT_SLOT_LAYOUTS: Record<number, FramePhotoPlacement[]> = {
     {
       slotNumber: 2,
       sourcePhotoSlot: 2,
-      x: 130,
-      y: 740,
-      width: 940,
-      height: 520,
+      x: 124,
+      y: 765,
+      width: 898,
+      height: 538,
       borderRadius: 0,
       zIndex: 10,
       objectFit: 'cover',
@@ -50,10 +55,10 @@ const DEFAULT_SLOT_LAYOUTS: Record<number, FramePhotoPlacement[]> = {
     {
       slotNumber: 1,
       sourcePhotoSlot: 1,
-      x: 145,
-      y: 140,
-      width: 910,
-      height: 340,
+      x: 138,
+      y: 145,
+      width: 869,
+      height: 351,
       borderRadius: 0,
       zIndex: 10,
       objectFit: 'cover',
@@ -62,10 +67,10 @@ const DEFAULT_SLOT_LAYOUTS: Record<number, FramePhotoPlacement[]> = {
     {
       slotNumber: 2,
       sourcePhotoSlot: 2,
-      x: 145,
-      y: 520,
-      width: 910,
-      height: 340,
+      x: 138,
+      y: 538,
+      width: 869,
+      height: 351,
       borderRadius: 0,
       zIndex: 10,
       objectFit: 'cover',
@@ -74,10 +79,10 @@ const DEFAULT_SLOT_LAYOUTS: Record<number, FramePhotoPlacement[]> = {
     {
       slotNumber: 3,
       sourcePhotoSlot: 3,
-      x: 145,
-      y: 900,
-      width: 910,
-      height: 340,
+      x: 138,
+      y: 930,
+      width: 869,
+      height: 351,
       borderRadius: 0,
       zIndex: 10,
       objectFit: 'cover',
@@ -88,11 +93,11 @@ const DEFAULT_SLOT_LAYOUTS: Record<number, FramePhotoPlacement[]> = {
 };
 
 const createStackedSlots = (photoSlotCount: number): FramePhotoPlacement[] => {
-  const gap = 42;
-  const x = 120;
-  const y = 140;
-  const width = 960;
-  const availableHeight = 1180;
+  const gap = 43;
+  const x = 115;
+  const y = 145;
+  const width = 917;
+  const availableHeight = 1220;
   const slotHeight = (availableHeight - gap * (photoSlotCount - 1)) / photoSlotCount;
 
   return Array.from({ length: photoSlotCount }, (_, index) => ({
