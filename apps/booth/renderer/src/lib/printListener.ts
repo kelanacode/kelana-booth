@@ -15,12 +15,13 @@
  * Until then the session stays 'ready_to_print'.
  *
  * The requests are carried by tiny JSON files on the gallery (see organize.ts)
- * so the whole channel reuses the existing Worker storage. Tokens are tracked
- * in localStorage so the listener keeps working across renderer reloads and
- * after the booth resets for the next paying customer.
+ * so the whole channel reuses the existing Worker storage. Timed sessions are
+ * tracked in localStorage (uploadJob.ts) so the listener keeps working across
+ * renderer reloads and after the booth resets for the next paying customer.
+ * Each check is a Worker request, so a session is checked less often as it
+ * ages (checkEvery) and dropped after TRACK_FOR: most guests never send one.
  */
 import { useBoothConfig } from '../store/boothConfigStore';
-import { useSessionStore } from '../store/sessionStore';
 import { GALLERY_URL } from '../config';
 import { buildAnimatedOutput, buildArrangedOutputs, LIVE_OUTPUT, prepareArrangement } from './arrangedOutputs';
 import { uploadSessionFiles } from '../utils/sessionUpload';
@@ -29,9 +30,9 @@ import {
   ORGANIZE_FILE,
   PRINT_REQUEST_FILE,
   PRINT_RESULT_FILE,
+  markPrintTokenChecked,
   readJsonFile,
   readPrintTokens,
-  trackPrintToken,
   untrackPrintToken,
   writeJsonFile,
   OrganizeManifest,
@@ -42,6 +43,17 @@ import { cacheUploadBlob, sessionFileUrl, updateSessionRecord } from './sessions
 const HANDLED_KEY = 'photo-booth.generated-requests';
 const READY_TOKENS_KEY = 'photo-booth.ready-tokens';
 const POLL_INTERVAL = 4000;
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+/** A session is dropped this long after its guest got the organize link. */
+const TRACK_FOR = 12 * HOUR;
+/**
+ * How often one tracked session is checked, by age: every tick while the guest
+ * is most likely arranging at the booth, then rarely for a guest who finishes
+ * later. Most sessions never send a request, and every check is a Worker request.
+ */
+const checkEvery = (age: number): number =>
+  age < 10 * MINUTE ? POLL_INTERVAL : age < 2 * HOUR ? 30_000 : 5 * MINUTE;
 /** One request may take a while (GIFs), but never block the listener for good. */
 const REQUEST_TIMEOUT = 3 * 60 * 1000;
 /**
@@ -71,7 +83,8 @@ const handledAdd = (requestId: string) => {
 };
 
 const handledHas = (requestId: string): boolean => readStringArray(HANDLED_KEY).includes(requestId);
-let processing = false;
+/** One pass at a time: a slow pass (or a 3-minute render) must not stack up more checks. */
+let polling = false;
 
 /**
  * Sessions whose approved arrangement has been generated (framed.png cached to
@@ -258,12 +271,28 @@ const finishPendingOutputs = async (token: string, request: PrintRequestFile): P
 };
 
 const pollOnce = async () => {
-  if (!GALLERY_URL || processing) {
+  if (!GALLERY_URL || polling) {
     return;
   }
-  const tokens = readPrintTokens();
-  for (const token of tokens) {
-    const request = await readJsonFile<PrintRequestFile>(GALLERY_URL, token, PRINT_REQUEST_FILE);
+  polling = true;
+  try {
+    await pollTokens(GALLERY_URL);
+  } finally {
+    polling = false;
+  }
+};
+
+const pollTokens = async (endpoint: string) => {
+  for (const { token, trackedAt, checkedAt } of readPrintTokens()) {
+    const age = Date.now() - trackedAt;
+    if (age > TRACK_FOR) {
+      untrackPrintToken(token);
+      continue;
+    }
+    // Shared with the other window: whichever checked last, the next is due after checkEvery.
+    if (Date.now() - checkedAt < checkEvery(age) - 1000) continue;
+    markPrintTokenChecked(token);
+    const request = await readJsonFile<PrintRequestFile>(endpoint, token, PRINT_REQUEST_FILE);
     const hasPending = request?.status === 'handled' && (request.pendingOutputs?.length ?? 0) > 0;
     if (request?.status === 'handled' && !handledHas(request.requestId)) {
       // Generated elsewhere (normally the guest's phone): take the print into
@@ -283,7 +312,6 @@ const pollOnce = async () => {
       } catch {
         // No storage: worst case both windows make the same GIF.
       }
-      processing = true;
       try {
         await Promise.race([
           finishPendingOutputs(token, request),
@@ -293,8 +321,6 @@ const pollOnce = async () => {
         ]);
       } catch (error) {
         console.error('Finishing pending GIFs failed:', error);
-      } finally {
-        processing = false;
       }
       break;
     }
@@ -326,9 +352,8 @@ const pollOnce = async () => {
       // No storage: worst case both windows render the same request.
     }
 
-    processing = true;
     // Tell the guest's page a booth has it (it shows "booth not reachable" otherwise).
-    await writeJsonFile(GALLERY_URL, token, PRINT_REQUEST_FILE, { ...request, status: 'processing', processingAt: Date.now() });
+    await writeJsonFile(endpoint, token, PRINT_REQUEST_FILE, { ...request, status: 'processing', processingAt: Date.now() });
     try {
       await Promise.race([
         handleRequest(token, request),
@@ -339,17 +364,15 @@ const pollOnce = async () => {
       untrackPrintToken(token);
     } catch (error) {
       console.error('Gallery output generation failed:', error);
-      await writeJsonFile(GALLERY_URL, token, PRINT_RESULT_FILE, {
+      await writeJsonFile(endpoint, token, PRINT_RESULT_FILE, {
         requestId: request.requestId,
         printedAt: Date.now(),
         status: 'error',
         message: 'Booth output generation failed.',
       });
-      await writeJsonFile(GALLERY_URL, token, PRINT_REQUEST_FILE, { ...request, status: 'handled' });
+      await writeJsonFile(endpoint, token, PRINT_REQUEST_FILE, { ...request, status: 'handled' });
       handledAdd(request.requestId);
       untrackPrintToken(token);
-    } finally {
-      processing = false;
     }
     break;
   }
@@ -364,19 +387,8 @@ export const startPrintListener = () => {
   }
   started = true;
 
-  // Track the current session's token as soon as it is published (the QR link
-  // is what the customer's arrange page lives behind). Tokens persist in
-  // localStorage, so requests arriving after a booth reset still get generated.
-  useSessionStore.subscribe((state, prev) => {
-    if (state.sessionToken && state.sessionToken !== prev.sessionToken) {
-      trackPrintToken(state.sessionToken);
-    }
-  });
-  const current = useSessionStore.getState().sessionToken;
-  if (current) {
-    trackPrintToken(current);
-  }
-
+  // Only timed sessions have an organize page; uploadJob tracks each one when
+  // its token is made (not every session, whose print-request.json never exists).
   void pollOnce();
   setInterval(() => void pollOnce(), POLL_INTERVAL);
 };

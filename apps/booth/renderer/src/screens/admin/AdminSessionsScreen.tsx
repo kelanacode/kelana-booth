@@ -15,6 +15,8 @@ import { registerGallerySession, SessionUploadFile, uploadSessionFiles, deleteGa
 import { generateQrDataUrl } from '../../utils/qr';
 import { APP_URL, GALLERY_URL } from '../../config';
 import { dropPendingUploads } from '../../lib/uploadJob';
+import { trackPrintToken } from '../../lib/organize';
+import { BoothOutputSettings, useBoothConfig } from '../../store/boothConfigStore';
 import { ConfirmModal } from '../../components/admin/Modal';
 import { SkeletonCard } from '../../components/admin/Skeleton';
 import { EventsManager } from '../../components/admin/EventsManager';
@@ -89,11 +91,39 @@ interface ResultLinkProps {
  * results modal can show them, but the booth's patch can be missed (offline
  * snapshot, killed renderer, race) even though the gallery holds the files.
  */
-const GENERATED_OUTPUTS = ['framed.png', 'result.gif', 'result-live.gif'];
+const GENERATED_OUTPUTS: Array<[name: string, toggle: keyof BoothOutputSettings]> = [
+  ['framed.png', 'framed'],
+  ['result.gif', 'gif'],
+  ['result-live.gif', 'framedLive'],
+];
 
-/** Whether a session's record is missing one of the generated outputs. */
-const needsGallerySync = (row: SessionRecord): boolean =>
-  GENERATED_OUTPUTS.some((name) => !row.files.some((file) => file.name === name && file.uploaded));
+/**
+ * Whether a session's record is missing an output the booth makes. Outputs
+ * switched off in setup never arrive, so they must not count as missing (the
+ * admin window shares the booth's setup). Timed sessions always get framed.png.
+ */
+const needsGallerySync = (row: SessionRecord): boolean => {
+  const { outputs } = useBoothConfig.getState();
+  return GENERATED_OUTPUTS.some(
+    ([name, toggle]) =>
+      (outputs[toggle] || (name === 'framed.png' && row.flow_mode === 'timed')) &&
+      !row.files.some((file) => file.name === name && file.uploaded),
+  );
+};
+
+/** When this window last asked the gallery about each session. */
+const galleryCheckedAt = new Map<string, number>();
+const MINUTE = 60_000;
+
+/**
+ * How often an incomplete session is re-checked, by age. The list holds every
+ * session ever and each check is a Worker request, so one that stays incomplete
+ * (a guest who never arranged, a failed upload) must not cost a request every
+ * refresh forever. Recent ones are checked every refresh while outputs are still
+ * landing; older ones once per window.
+ */
+const gallerySyncEvery = (age: number): number =>
+  age < 30 * MINUTE ? 0 : age < 12 * 60 * MINUTE ? 10 * MINUTE : Infinity;
 
 /** Merge the gallery's file list into a session record's files by name. */
 const mergeGalleryFiles = (
@@ -139,16 +169,16 @@ const reconcileFromGallery = async (rows: SessionRecord[]): Promise<SessionRecor
   }
   const now = Date.now();
   const candidates = rows.filter((row) => {
-    if (needsGallerySync(row)) return true;
-    return (
-      row.upload_status === 'uploading' &&
-      row.created_at &&
-      now - new Date(row.created_at).getTime() > 60_000
-    );
+    const age = now - new Date(row.created_at).getTime();
+    const incomplete = needsGallerySync(row) || (row.upload_status === 'uploading' && age > 60_000);
+    if (!incomplete) return false;
+    const checkedAt = galleryCheckedAt.get(row.token);
+    return checkedAt === undefined || now - checkedAt >= gallerySyncEvery(age);
   });
   if (candidates.length === 0) {
     return rows;
   }
+  for (const row of candidates) galleryCheckedAt.set(row.token, now);
 
   const synced = new Map<string, SessionRecord>();
   await Promise.all(
@@ -180,6 +210,7 @@ const reconcileFromGallery = async (rows: SessionRecord[]): Promise<SessionRecor
         });
       } catch {
         // Gallery unreachable — leave the row untouched; next refresh retries.
+        galleryCheckedAt.delete(row.token);
       }
     }),
   );
@@ -689,6 +720,13 @@ export const AdminSessionsScreen: React.FC = () => {
 
   const resultsSession = useMemo(() => sessions.find((s) => s.token === resultsToken) ?? null, [sessions, resultsToken]);
   const resultsLink = resultsSession ? sessionLink(resultsSession) : { url: '', pending: false };
+
+  // Showing a guest their organize link again: the print listener stops
+  // watching sessions after a while, so start watching this one afresh.
+  const resultsPending = resultsLink.pending;
+  useEffect(() => {
+    if (resultsToken && resultsPending) trackPrintToken(resultsToken);
+  }, [resultsToken, resultsPending]);
 
   useEffect(() => {
     if (!resultsToken) return;

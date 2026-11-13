@@ -126,20 +126,38 @@ export const sessionUrl = (endpoint: string, token: string): string => `${endpoi
 
 /** Tokens whose organize page the booth's print listener watches. */
 export const PRINT_TOKENS_KEY = 'photo-booth.print-tokens';
-/** Upper bound only; tokens leave the list as soon as their request is generated. */
+/** Upper bound only; tokens leave the list once their request is generated or they age out. */
 const MAX_PRINT_TOKENS = 60;
 
-export const readPrintTokens = (): string[] => {
+export interface TrackedPrintToken {
+  token: string;
+  /** When the guest got the organize link (or the admin showed it again). */
+  trackedAt: number;
+  /** Last time a window asked the gallery for its print-request.json (0 = never). */
+  checkedAt: number;
+}
+
+/**
+ * Newest first. Bare-string entries come from builds before tracking was
+ * timestamped; they read as tracked at 0, so the listener drops them as expired.
+ */
+export const readPrintTokens = (): TrackedPrintToken[] => {
   try {
     const raw = localStorage.getItem(PRINT_TOKENS_KEY);
     const parsed = raw ? (JSON.parse(raw) as unknown) : [];
-    return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry): TrackedPrintToken[] => {
+      if (typeof entry === 'string') return entry ? [{ token: entry, trackedAt: 0, checkedAt: 0 }] : [];
+      const tracked = entry as Partial<TrackedPrintToken> | null;
+      if (!tracked || typeof tracked.token !== 'string' || !tracked.token) return [];
+      return [{ token: tracked.token, trackedAt: Number(tracked.trackedAt) || 0, checkedAt: Number(tracked.checkedAt) || 0 }];
+    });
   } catch {
     return [];
   }
 };
 
-const writePrintTokens = (tokens: string[]): void => {
+const writePrintTokens = (tokens: TrackedPrintToken[]): void => {
   try {
     localStorage.setItem(PRINT_TOKENS_KEY, JSON.stringify(tokens.slice(0, MAX_PRINT_TOKENS)));
   } catch {
@@ -147,16 +165,35 @@ const writePrintTokens = (tokens: string[]): void => {
   }
 };
 
-/** Watch this session's organize page for a print request (newest first). */
+/**
+ * Watch this session's organize page for a print request (newest first).
+ * Tracking a token again restarts its clock, so it is checked often again.
+ */
 export const trackPrintToken = (token: string): void => {
   if (!token) return;
-  writePrintTokens([token, ...readPrintTokens().filter((t) => t !== token)]);
+  writePrintTokens([
+    { token, trackedAt: Date.now(), checkedAt: 0 },
+    ...readPrintTokens().filter((t) => t.token !== token),
+  ]);
 };
 
-/** Stop watching a session once its request has been generated. */
+/** Stop watching a session once its request has been generated (or it aged out). */
 export const untrackPrintToken = (token: string): void => {
   const tokens = readPrintTokens();
-  if (tokens.includes(token)) writePrintTokens(tokens.filter((t) => t !== token));
+  if (tokens.some((t) => t.token === token)) writePrintTokens(tokens.filter((t) => t.token !== token));
+};
+
+/**
+ * Records a check of this token. The booth and admin windows share the list,
+ * so a check made by either window counts for both. Re-reads before writing so
+ * a token tracked meanwhile by the other window is never lost.
+ */
+export const markPrintTokenChecked = (token: string): void => {
+  const tokens = readPrintTokens();
+  const entry = tokens.find((t) => t.token === token);
+  if (!entry) return;
+  entry.checkedAt = Date.now();
+  writePrintTokens(tokens);
 };
 
 /**
