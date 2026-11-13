@@ -3,6 +3,7 @@ import { useSessionStore } from './store/sessionStore';
 import { appearanceBackgroundStyle, useBoothAppearance } from './store/appearanceStore';
 import { AdminApp } from './screens/admin/AdminApp';
 import { OrganizeScreen } from './screens/OrganizeScreen';
+import { BoothHomeButton } from './components/booth/BoothHomeButton';
 import {
   ContextBumperScreen,
   UnlockScreen,
@@ -53,10 +54,11 @@ function App() {
     path: window.location.pathname,
     hash: window.location.hash,
   }));
-  const { currentScreen, sessionId, startNewSession } = useSessionStore((state) => ({
+  const { currentScreen, sessionId, startNewSession, resetSession } = useSessionStore((state) => ({
     currentScreen: state.currentScreen,
     sessionId: state.sessionId,
     startNewSession: state.startNewSession,
+    resetSession: state.resetSession,
   }));
   const isFrameFitterRoute = isFrameFitterPath(route.path, route.hash);
   const isBoothSetupRoute = isBoothSetupPath(route.path, route.hash);
@@ -169,6 +171,7 @@ function App() {
       }}
     >
       <main className="mx-auto w-full max-w-[1200px]">{renderScreen()}</main>
+      {currentScreen !== 'CONTEXT_BUMPER' && <BoothHomeButton theme={appearance.theme} onReset={resetSession} />}
     </div>
   );
 }

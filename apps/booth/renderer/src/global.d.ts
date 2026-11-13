@@ -19,6 +19,8 @@ export interface IElectronAPICamera {
   stopLiveView: () => Promise<CameraStatePayload>;
   prepareCapture: () => Promise<CameraStatePayload>;
   takePicture: () => Promise<CameraCaptureResult>;
+  /** Capture screen closed: restores Live View if it was armed for a shot that never came. */
+  releaseCapture: () => Promise<CameraStatePayload>;
   /** Reads the values the connected camera offers for every supported setting. */
   getSettings: () => Promise<CameraSettingsSnapshot>;
   /** Pushes settings to the camera (live view is paused for the write). */

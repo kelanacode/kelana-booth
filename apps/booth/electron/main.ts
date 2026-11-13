@@ -224,6 +224,7 @@ app.whenReady().then(() => {
   ipcMain.handle('camera:stopLiveView', () => cameraService?.stopLiveView() ?? null);
   ipcMain.handle('camera:prepareCapture', () => cameraService?.prepareCapture() ?? null);
   ipcMain.handle('camera:takePicture', () => cameraService?.takePicture() ?? null);
+  ipcMain.handle('camera:releaseCapture', () => cameraService?.releaseCapture() ?? null);
   ipcMain.handle('camera:getSettings', () =>
     cameraService?.readSettings() ?? { model: null, items: [] },
   );

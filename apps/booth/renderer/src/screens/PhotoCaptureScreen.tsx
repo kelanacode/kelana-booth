@@ -61,6 +61,8 @@ export const PhotoCaptureScreen: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const captureInFlightRef = useRef(false);
+  /** The Canon was armed (Live View off) and its shutter has not been sent yet. */
+  const armedWithoutShotRef = useRef(false);
   const [timedPhase, setTimedPhase] = useState<'idle' | 'starting' | 'active' | 'ended'>('idle');
   const [timedStartCountLeft, setTimedStartCountLeft] = useState(0);
   const [timedRemaining, setTimedRemaining] = useState(0);
@@ -238,6 +240,7 @@ export const PhotoCaptureScreen: React.FC = () => {
     try {
       if (canonCaptureAvailable) {
         setIsCapturing(true);
+        armedWithoutShotRef.current = false;
         const result = await canon.capture();
         const currentSession = useSessionStore.getState();
         if (
@@ -306,6 +309,20 @@ export const PhotoCaptureScreen: React.FC = () => {
 
   const canonRef = useRef(canon);
   canonRef.current = canon;
+
+  // Leaving mid-countdown (booth reset, or any other exit) after the Canon was
+  // armed for a shot that never came would leave Live View off. The camera
+  // service restores it — queued behind any shot already sent, which it then
+  // leaves alone, so this never interrupts a capture.
+  useEffect(
+    () => () => {
+      if (armedWithoutShotRef.current) {
+        armedWithoutShotRef.current = false;
+        canonRef.current.releaseCapture();
+      }
+    },
+    [],
+  );
 
   // Rolling buffer of downscaled live view frames recorded just before the
   // shot. Fed to the attempt so the framed "live photo" result can animate
@@ -401,6 +418,7 @@ export const PhotoCaptureScreen: React.FC = () => {
       let cancelled = false;
       prepareStartedAtRef.current = Date.now();
       setIsPreparing(true);
+      armedWithoutShotRef.current = true;
       void (async () => {
         let armed = false;
         try {

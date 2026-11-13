@@ -168,6 +168,11 @@ export function usePhotoBoothCamera() {
     await start();
   }, [start]);
 
+  /** The capture screen is closing: let the camera bring Live View back if it was armed. */
+  const releaseCapture = useCallback(() => {
+    void api?.releaseCapture().catch(() => undefined);
+  }, [api]);
+
   return {
     available,
     status,
@@ -181,5 +186,6 @@ export function usePhotoBoothCamera() {
     capture,
     prepareCapture,
     retry,
+    releaseCapture,
   };
 }

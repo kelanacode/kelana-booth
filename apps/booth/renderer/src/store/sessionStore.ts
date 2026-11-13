@@ -551,6 +551,11 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
   },
 
   resetSession: () => {
+    // Reset mid-session (the booth's home button): a numbered guest's run ends
+    // here, so the line moves on as if they had finished. Background uploads
+    // and queued prints carry on; only this screen flow starts over.
+    const { queueTicketId } = get();
+    if (queueTicketId) void markQueueDone(queueTicketId);
     get().startNewSession();
   },
 }));

@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stopLiveView: () => ipcRenderer.invoke('camera:stopLiveView'),
     prepareCapture: () => ipcRenderer.invoke('camera:prepareCapture'),
     takePicture: () => ipcRenderer.invoke('camera:takePicture'),
+    releaseCapture: () => ipcRenderer.invoke('camera:releaseCapture'),
     getSettings: () => ipcRenderer.invoke('camera:getSettings'),
     applySettings: (settings: unknown) => ipcRenderer.invoke('camera:applySettings', settings),
     configure: (config: unknown) => ipcRenderer.invoke('camera:configure', config),

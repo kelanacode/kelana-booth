@@ -332,6 +332,26 @@ export class GphotoCameraService {
     });
   }
 
+  /**
+   * The capture screen closed (booth reset, or any other exit mid-countdown).
+   * If prepareCapture switched Live View off for a shot that never came, bring
+   * it back. Queued like every camera command: a shot already on its way runs
+   * first and clears the flag (restoring Live View itself), so this then does
+   * nothing — it never touches a capture. The restart waits the post-shot
+   * settle and retries on busy, like any other Live View restore.
+   */
+  async releaseCapture(): Promise<CameraStatePayload> {
+    return this.enqueue(async () => {
+      if (this.capturePrepared && this.restoreAfterCapture && this.movieChild === null) {
+        this.scheduleLiveViewRestore(undefined, POST_CAPTURE_SETTLE_MS);
+      } else if (this.capturePrepared) {
+        this.capturePrepared = false;
+        this.restoreAfterCapture = false;
+      }
+      return this.state();
+    });
+  }
+
   async takePicture(): Promise<CameraCaptureResult> {
     return this.enqueue(async () => {
       this.setStatus('CAPTURING');
