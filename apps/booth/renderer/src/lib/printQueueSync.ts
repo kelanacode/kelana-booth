@@ -10,7 +10,7 @@ import {
   readySessionsSnapshot,
 } from './printListener';
 import { framedToPrintSheet } from './printSheet';
-import { useBoothConfig } from '../store/boothConfigStore';
+import { savedPrinterSettings, useBoothConfig } from '../store/boothConfigStore';
 import { useSessionStore } from '../store/sessionStore';
 import { IElectronAPIPrintJobState, IElectronAPIPrintQueueSnapshot } from '../global';
 
@@ -54,7 +54,8 @@ const resolvePrintSheet = async (token: string, name: string): Promise<string> =
   let lastError = 'No framed image is available for this session.';
   let attempt = 0;
 
-  const { frameTopMm } = useBoothConfig.getState().printer;
+  // Latest saved value: Frame top may have just been changed in another window.
+  const { frameTopMm } = savedPrinterSettings();
   while (Date.now() < deadline) {
     const cached = await getUploadedBlob(token, name);
     if (cached) {

@@ -234,6 +234,8 @@ export const DEFAULT_BOOTH_CONFIG = {
   access: DEFAULT_ACCESS,
 };
 
+const BOOTH_CONFIG_KEY = 'photo-booth.setup';
+
 export const useBoothConfig = create<BoothConfigState>()(
   persist(
     (set) => ({
@@ -248,7 +250,7 @@ export const useBoothConfig = create<BoothConfigState>()(
       resetConfig: () => set({ ...DEFAULT_BOOTH_CONFIG }),
     }),
     {
-      name: 'photo-booth.setup',
+      name: BOOTH_CONFIG_KEY,
       version: 8,
       migrate: (persistedState, version) => {
         const state = persistedState as {
@@ -292,3 +294,21 @@ export const useBoothConfig = create<BoothConfigState>()(
     },
   ),
 );
+/**
+ * Printer settings as last saved by any window. The dev admin window is its own
+ * renderer with its own copy of this store, so a change made there (e.g. Frame
+ * top from Sessions → Print) reaches the booth window only through storage.
+ * Read-only: nothing here writes the store or notifies its subscribers.
+ */
+export const savedPrinterSettings = (): BoothPrinterSettings => {
+  const current = useBoothConfig.getState().printer;
+  try {
+    const raw = localStorage.getItem(BOOTH_CONFIG_KEY);
+    const saved = raw
+      ? (JSON.parse(raw) as { state?: { printer?: Partial<BoothPrinterSettings> } }).state?.printer
+      : undefined;
+    return saved ? { ...current, ...saved } : current;
+  } catch {
+    return current;
+  }
+};

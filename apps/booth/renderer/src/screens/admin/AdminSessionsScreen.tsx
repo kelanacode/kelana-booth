@@ -16,8 +16,9 @@ import { generateQrDataUrl } from '../../utils/qr';
 import { APP_URL, GALLERY_URL } from '../../config';
 import { dropPendingUploads } from '../../lib/uploadJob';
 import { trackPrintToken } from '../../lib/organize';
-import { BoothOutputSettings, useBoothConfig } from '../../store/boothConfigStore';
+import { BoothOutputSettings, savedPrinterSettings, useBoothConfig } from '../../store/boothConfigStore';
 import { ConfirmModal } from '../../components/admin/Modal';
+import { PrintSessionModal } from '../../components/admin/PrintSessionModal';
 import { SkeletonCard } from '../../components/admin/Skeleton';
 import { EventsManager } from '../../components/admin/EventsManager';
 import { assignSessionsToEvent, BoothEvent, listEvents } from '../../lib/events';
@@ -34,6 +35,7 @@ import {
   IconGif,
   IconImage,
   IconPencil,
+  IconPrinter,
   IconQr,
   IconSearch,
   IconTrash,
@@ -238,6 +240,8 @@ interface SessionCardProps {
   onToggle: () => void;
   onOpen: () => void;
   onReupload: () => void;
+  /** Opens the print confirmation; absent when the session cannot be printed here. */
+  onPrint?: () => void;
 }
 
 type SessionsView = 'gallery' | 'list';
@@ -260,6 +264,7 @@ const SessionRow: React.FC<SessionCardProps> = ({
   onToggle,
   onOpen,
   onReupload,
+  onPrint,
 }) => {
   const preview = sessionPreviewUrl(session);
   const isFramed = session.files.some((file) => file.name === 'framed.png' && file.uploaded);
@@ -348,6 +353,16 @@ const SessionRow: React.FC<SessionCardProps> = ({
               {link.pending ? <IconPencil className="h-4 w-4" /> : <IconQr className="h-4 w-4" />}
             </a>
           )}
+          {onPrint && (
+            <button
+              onClick={onPrint}
+              title="Print"
+              aria-label="Print session"
+              className="grid h-8 w-8 place-items-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
+            >
+              <IconPrinter className="h-4 w-4" />
+            </button>
+          )}
           <button
             onClick={onOpen}
             title="View results"
@@ -417,6 +432,7 @@ const SessionCard: React.FC<SessionCardProps> = ({
   onToggle,
   onOpen,
   onReupload,
+  onPrint,
 }) => {
   const preview = sessionPreviewUrl(session);
   const isFramed = session.files.some((file) => file.name === 'framed.png' && file.uploaded);
@@ -462,6 +478,16 @@ const SessionCard: React.FC<SessionCardProps> = ({
             >
               {link.pending ? <IconPencil className="h-5 w-5" /> : <IconQr className="h-5 w-5" />}
             </a>
+          )}
+          {onPrint && (
+            <button
+              onClick={onPrint}
+              title="Print"
+              aria-label="Print session"
+              className="grid h-10 w-10 place-items-center rounded-full bg-white/15 text-white backdrop-blur transition hover:bg-white/30"
+            >
+              <IconPrinter className="h-5 w-5" />
+            </button>
           )}
           {session.upload_status === 'error' && (
             <button
@@ -518,6 +544,9 @@ export const AdminSessionsScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [printTarget, setPrintTarget] = useState<SessionRecord | null>(null);
+  const [printBusy, setPrintBusy] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [resultsToken, setResultsToken] = useState<string | null>(null);
@@ -681,6 +710,63 @@ export const AdminSessionsScreen: React.FC = () => {
       setError(err instanceof Error ? err.message : 'Moving sessions failed');
     } finally {
       setMoveBusy(false);
+    }
+  };
+
+  /** Printing needs the desktop app (the hosted /admin has no printer) and a framed sheet. */
+  const canPrint = typeof window.electronAPI?.printer?.enqueue === 'function';
+  const printHandler = (session: SessionRecord) =>
+    canPrint && session.files.some((file) => file.name === 'framed.png')
+      ? () => setPrintTarget(session)
+      : undefined;
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 6000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  /**
+   * Manual print: queues the session and starts it straight away, whatever the
+   * booth's print mode. The queue reuses a job already waiting or printing for
+   * this session, so a double confirm never prints it twice; a finished,
+   * failed or canceled session is queued again (a reprint). The booth window
+   * lays the sheet out when the job runs, with the latest Frame top.
+   */
+  const handlePrint = async () => {
+    const session = printTarget;
+    const api = window.electronAPI?.printer;
+    if (!session || !api) return;
+    const printer = savedPrinterSettings();
+    if (!printer.queueName) {
+      setError('No printer queue is set. Choose one in Booth Setup → Printer first.');
+      return;
+    }
+    setPrintBusy(true);
+    setError(null);
+    try {
+      const job = await api.enqueue({
+        token: session.token,
+        fileName: 'framed.png',
+        queueName: printer.queueName,
+        copies: printer.copies,
+        paperSize: printer.paperSize,
+        mediaType: printer.mediaType,
+        quality: printer.quality,
+        colorMode: printer.colorMode,
+      });
+      const label = session.token.slice(0, 8);
+      if (job.state === 'pending') {
+        await api.startBatch([job.id]);
+        setNotice(`Session ${label} sent to the printer.`);
+      } else {
+        setNotice(`Session ${label} is already printing.`);
+      }
+      setPrintTarget(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Printing failed');
+    } finally {
+      setPrintBusy(false);
     }
   };
 
@@ -913,6 +999,11 @@ export const AdminSessionsScreen: React.FC = () => {
           {error}
         </div>
       )}
+      {notice && (
+        <div className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-200" role="status">
+          {notice}
+        </div>
+      )}
 
       <div className="mb-3 flex gap-2 overflow-x-auto px-1 pb-1" role="tablist" aria-label="Filter by event">
         {(
@@ -1082,6 +1173,7 @@ export const AdminSessionsScreen: React.FC = () => {
                   onToggle={() => toggleOne(session.token)}
                   onOpen={() => setResultsToken(session.token)}
                   onReupload={() => handleReupload(session)}
+                  onPrint={printHandler(session)}
                 />
               ))}
             </div>
@@ -1110,6 +1202,7 @@ export const AdminSessionsScreen: React.FC = () => {
                       onToggle={() => toggleOne(session.token)}
                       onOpen={() => setResultsToken(session.token)}
                       onReupload={() => handleReupload(session)}
+                      onPrint={printHandler(session)}
                     />
                   ))}
                 </tbody>
@@ -1137,6 +1230,14 @@ export const AdminSessionsScreen: React.FC = () => {
         busy={deleteBusy}
         onConfirm={handleDelete}
         onCancel={() => setDeleteOpen(false)}
+      />
+
+      <PrintSessionModal
+        session={printTarget}
+        eventName={printTarget?.event_id ? eventsById.get(printTarget.event_id)?.name : undefined}
+        busy={printBusy}
+        onConfirm={() => void handlePrint()}
+        onCancel={() => setPrintTarget(null)}
       />
 
       {resultsSession && (
