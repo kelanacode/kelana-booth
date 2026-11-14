@@ -54,10 +54,11 @@ const resolvePrintSheet = async (token: string, name: string): Promise<string> =
   let lastError = 'No framed image is available for this session.';
   let attempt = 0;
 
+  const { frameTopMm } = useBoothConfig.getState().printer;
   while (Date.now() < deadline) {
     const cached = await getUploadedBlob(token, name);
     if (cached) {
-      return framedToPrintSheet(cached);
+      return framedToPrintSheet(cached, frameTopMm);
     }
 
     // Only reach for the gallery on the first pass and then occasionally.
@@ -67,7 +68,7 @@ const resolvePrintSheet = async (token: string, name: string): Promise<string> =
         try {
           const response = await fetch(url);
           if (response.ok) {
-            return await framedToPrintSheet(await response.blob());
+            return await framedToPrintSheet(await response.blob(), frameTopMm);
           }
           lastError = `Gallery returned ${response.status}.`;
         } catch (error) {

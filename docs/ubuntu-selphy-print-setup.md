@@ -121,10 +121,13 @@ The SELPHY prints past the card's edges. For the 100×148 mm postcard it prints
 
 The app sends the print sheet from `apps/booth/renderer/src/lib/printSheet.ts`:
 a white 100 × 150 mm canvas (the printed area's shape) with the frame resized to
-97 × 140 mm, 1.5 mm from the left and 4.5 mm from the top. That layout was tuned
-on the Windows driver (`windows-selphy-print-setup.md`); Gutenprint centres the
-card in the printed area slightly differently, so check one session print on
-Ubuntu: the top may show a sliver (~0.5 mm) of the white canvas.
+97 × 140 mm, 1.5 mm from the left. Its distance from the top is the
+**Frame top** setting (Booth Setup → Printer): 4.5 mm was tuned on the Windows
+driver (`windows-selphy-print-setup.md`), but Gutenprint places the card ~2 mm
+lower — at 4.5 mm the top of the frame was cut and ~2 mm of white showed at the
+bottom (Nov 2026). On Ubuntu the setting therefore defaults to **6.4 mm**. Check
+with the setup test print and adjust: top cut + white at the bottom → raise it;
+white at the top → lower it (1 mm of setting ≈ 1 mm on the card).
 
 To make manual `lp` tests from the shell borderless too, set the queue defaults:
 

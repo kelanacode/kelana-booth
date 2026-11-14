@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { CameraSettingKey, CameraSettingsValues } from '@photo-booth/types';
+import { GUTENPRINT_FRAME_TOP_MM, WINDOWS_FRAME_TOP_MM } from '../lib/printSheet';
 
 /**
  * Booth setup configuration (camera, printer, capture flow, outputs).
@@ -144,7 +145,17 @@ export interface BoothPrinterSettings {
   /** CUPS print-quality (3=draft, 4=normal, 5=high). */
   quality: number;
   colorMode: 'color' | 'grayscale';
+  /**
+   * Where the frame starts on the print sheet, in mm from its top (0–10). The
+   * printer driver decides where the card sits, so it differs by platform (see
+   * lib/printSheet.ts); tuned per booth with a test print.
+   */
+  frameTopMm: number;
 }
+
+/** Ubuntu desktop (CUPS + Gutenprint); Android phones also say "Linux". */
+const IS_LINUX_DESKTOP =
+  typeof navigator !== 'undefined' && /Linux/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent);
 
 export const DEFAULT_PRINTER: BoothPrinterSettings = {
   enabled: false,
@@ -155,6 +166,7 @@ export const DEFAULT_PRINTER: BoothPrinterSettings = {
   mediaType: 'photo',
   quality: 5,
   colorMode: 'color',
+  frameTopMm: IS_LINUX_DESKTOP ? GUTENPRINT_FRAME_TOP_MM : WINDOWS_FRAME_TOP_MM,
 };
 
 export interface CaptureFlowSettings {
@@ -237,7 +249,7 @@ export const useBoothConfig = create<BoothConfigState>()(
     }),
     {
       name: 'photo-booth.setup',
-      version: 7,
+      version: 8,
       migrate: (persistedState, version) => {
         const state = persistedState as {
           flow?: Record<string, unknown>;
@@ -270,6 +282,10 @@ export const useBoothConfig = create<BoothConfigState>()(
         if (version < 7) {
           // v7 adds the access slice (open vs voucher-locked booth).
           state.access = { ...DEFAULT_ACCESS, ...(state.access ?? {}) };
+        }
+        if (version < 8 && state.printer && state.printer.frameTopMm === undefined) {
+          // v8 adds the frame's top position on the print sheet (platform default).
+          state.printer.frameTopMm = DEFAULT_PRINTER.frameTopMm;
         }
         return state as unknown as BoothConfigState;
       },

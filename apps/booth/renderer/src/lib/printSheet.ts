@@ -22,6 +22,19 @@ const mmToPx = (mm: number) => Math.round((mm / MM_PER_INCH) * DPI);
 /** The whole print sheet: 100 × 150 mm at 300 dpi (1181 × 1772 px). */
 export const PRINT_SHEET = { width: mmToPx(100), height: mmToPx(150) };
 
+/**
+ * Where the frame starts, in mm from the sheet's top. 4.5 mm is the Windows
+ * (Canon driver) tuning above. Gutenprint on Ubuntu places the card ~2 mm
+ * lower on the printed area — at 4.5 mm the top was cut and ~2 mm of white
+ * showed at the bottom (Nov 2026) — so Ubuntu starts at 6.4 mm: 1.9 mm here is
+ * 2 mm on the card, since both drivers enlarge the sheet ~5.7% (1181 → 1248 px).
+ * Each booth fine-tunes it in Booth Setup → Printer → Frame top.
+ */
+export const WINDOWS_FRAME_TOP_MM = 4.5;
+export const GUTENPRINT_FRAME_TOP_MM = 6.4;
+/** The frame box fits on the sheet with its top anywhere in 0–10 mm. */
+export const FRAME_TOP_MAX_MM = 150 - 140;
+
 /** The frame's place on the sheet: 97 × 140 mm (1146 × 1654 px) at 1.5 / 4.5 mm. */
 export const PRINT_FRAME_BOX = {
   left: mmToPx(1.5),
@@ -34,10 +47,14 @@ export const PRINT_FRAME_BOX = {
 
 /**
  * Composes `artwork` (the framed photo) into the print sheet: resized to the
- * frame box on a white sheet. A landscape frame is turned a quarter turn
+ * frame box on a white sheet, its top `frameTopMm` from the sheet's top (the
+ * booth's printer setting). A landscape frame is turned a quarter turn
  * counter-clockwise onto the portrait sheet first.
  */
-export const composePrintSheet = (artwork: HTMLCanvasElement | ImageBitmap): HTMLCanvasElement => {
+export const composePrintSheet = (
+  artwork: HTMLCanvasElement | ImageBitmap,
+  frameTopMm: number = WINDOWS_FRAME_TOP_MM,
+): HTMLCanvasElement => {
   const sheet = document.createElement('canvas');
   sheet.width = PRINT_SHEET.width;
   sheet.height = PRINT_SHEET.height;
@@ -49,7 +66,9 @@ export const composePrintSheet = (artwork: HTMLCanvasElement | ImageBitmap): HTM
   ctx.fillRect(0, 0, sheet.width, sheet.height);
   ctx.imageSmoothingQuality = 'high';
 
-  const { left, top, width, height } = PRINT_FRAME_BOX;
+  const { left, width, height } = PRINT_FRAME_BOX;
+  const topMm = Number.isFinite(frameTopMm) ? frameTopMm : WINDOWS_FRAME_TOP_MM;
+  const top = Math.min(sheet.height - height, Math.max(0, mmToPx(topMm)));
   ctx.translate(left + width / 2, top + height / 2);
   if (artwork.width > artwork.height) {
     ctx.rotate(-Math.PI / 2);
@@ -65,10 +84,10 @@ export const printSheetDataUrl = (sheet: HTMLCanvasElement): string =>
   sheet.toDataURL('image/jpeg', 0.95);
 
 /** The print sheet (JPEG data URL) for a session's framed photo. */
-export const framedToPrintSheet = async (framed: Blob): Promise<string> => {
+export const framedToPrintSheet = async (framed: Blob, frameTopMm?: number): Promise<string> => {
   const artwork = await createImageBitmap(framed);
   try {
-    return printSheetDataUrl(composePrintSheet(artwork));
+    return printSheetDataUrl(composePrintSheet(artwork, frameTopMm));
   } finally {
     artwork.close();
   }

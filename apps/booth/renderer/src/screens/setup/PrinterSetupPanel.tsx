@@ -3,7 +3,7 @@ import { useBoothConfig } from '../../store/boothConfigStore';
 import { IElectronAPIPrinterStatusResult } from '../../global';
 import { NumberStepper } from '../../components/fields/Stepper';
 import { GlobalSettingNote, useGlobalSettingsEditor } from './GlobalSettingNote';
-import { composePrintSheet, printSheetDataUrl } from '../../lib/printSheet';
+import { composePrintSheet, FRAME_TOP_MAX_MM, printSheetDataUrl } from '../../lib/printSheet';
 
 const PAPER_SIZES = [
   { value: '100x148mm', label: '4×6 — 100×148mm' },
@@ -122,7 +122,7 @@ export const PrinterSetupPanel: React.FC = () => {
     setTestResult(null);
     try {
       const result = await window.electronAPI.printer.print({
-        dataUrl: printSheetDataUrl(composePrintSheet(makeTestSheet())),
+        dataUrl: printSheetDataUrl(composePrintSheet(makeTestSheet(), printer.frameTopMm)),
         fileName: 'selphy-test.jpg',
         queueName: printer.queueName,
         copies: printer.copies,
@@ -364,6 +364,17 @@ export const PrinterSetupPanel: React.FC = () => {
                 max={10}
                 step={1}
                 onChange={(copies) => updatePrinter({ copies })}
+              />
+              <NumberStepper
+                label="Frame top"
+                value={printer.frameTopMm}
+                min={0}
+                max={FRAME_TOP_MAX_MM}
+                step={0.5}
+                decimals={1}
+                suffix="mm"
+                hint="Top cut and white at the bottom: raise it. White at the top: lower it. 1 mm here ≈ 1 mm on the card."
+                onChange={(frameTopMm) => updatePrinter({ frameTopMm })}
               />
             </div>
           </div>
